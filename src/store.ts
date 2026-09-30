@@ -16,6 +16,8 @@ export interface Task {
   speed: string;
   note?: string;
   startedAt: number | null;
+  /** 结束时间戳：完成/失败/取消时由后端状态推送写入；排队中/进行中为 null */
+  finishedAt: number | null;
   cwd?: string;
 }
 
@@ -47,6 +49,10 @@ export const store = reactive({
   inputProbeErr: "",
   recent: [] as Recent[],
   tasks: [] as Task[],
+  /** 队列是否整体暂停：暂停后不再拉起新任务，已在进行中的继续跑完 */
+  paused: false,
+  /** 同时运行的任务数（1 = 串行，最大见 MAX_CONCURRENCY） */
+  concurrency: 2,
   // 引擎状态
   engineMsg: "检测中…",
   engineOk: false,
@@ -64,11 +70,24 @@ export const store = reactive({
 
 /** 主题持久化到本地存储（WebView 的用户数据目录，重启后仍在） */
 const THEME_KEY = "ffs-theme";
+/** 队列并行数持久化到本地存储（不需要后端配合，纯前端设置） */
+const CONCURRENCY_KEY = "ffs-concurrency";
+export const MIN_CONCURRENCY = 1;
+export const MAX_CONCURRENCY = 4;
 
 export async function initStore() {
   // 主题：先从本地存储恢复，再应用（避免启动瞬间闪浅色）
   try {
     store.dark = localStorage.getItem(THEME_KEY) === "dark";
+  } catch {
+    /* 忽略 */
+  }
+  // 队列并行数：从本地存储恢复（夹在合法区间内）
+  try {
+    const c = Number(localStorage.getItem(CONCURRENCY_KEY));
+    if (Number.isFinite(c) && c >= MIN_CONCURRENCY && c <= MAX_CONCURRENCY) {
+      store.concurrency = Math.floor(c);
+    }
   } catch {
     /* 忽略 */
   }
@@ -213,7 +232,7 @@ function newId() {
 }
 
 export function queueTask(name: string, cmd: string, cwd?: string) {
-  store.tasks.unshift({
+  store.tasks.push({
     id: newId(),
     name,
     cmd,
@@ -222,6 +241,7 @@ export function queueTask(name: string, cmd: string, cwd?: string) {
     time: "",
     speed: "",
     startedAt: null,
+    finishedAt: null,
     cwd,
   });
   pump();
@@ -229,7 +249,7 @@ export function queueTask(name: string, cmd: string, cwd?: string) {
 
 export function queueTasks(items: { name: string; cmd: string; cwd?: string }[]) {
   items.forEach((it) =>
-    store.tasks.unshift({
+    store.tasks.push({
       id: newId(),
       name: it.name,
       cmd: it.cmd,
@@ -238,24 +258,35 @@ export function queueTasks(items: { name: string; cmd: string; cwd?: string }[])
       time: "",
       speed: "",
       startedAt: null,
+      finishedAt: null,
       cwd: it.cwd,
     })
   );
   pump();
 }
 
-/** 同一时刻只跑一个任务；其余排队，跑完自动触发下一个 */
+/**
+ * 按并发数（store.concurrency）并行拉起排队中的任务。
+ * 队列是先进先出：数组靠前的先入队、先被拉起（queueTask 用 push 入队）。
+ * 暂停时直接返回，不再拉起新任务（进行中的继续跑完）。
+ */
 function pump() {
-  if (store.tasks.some((t) => t.status === "running")) return;
-  const next = store.tasks.find((t) => t.status === "queued");
-  if (!next) return;
-  next.status = "running";
-  next.startedAt = Date.now();
-  invoke("run_ffmpeg", { id: next.id, cmd: next.cmd, cwd: next.cwd || null }).catch((e) => {
-    next.status = "failed";
-    next.note = typeof e === "string" ? e : "启动失败";
-    pump();
-  });
+  if (store.paused) return;
+  const running = store.tasks.filter((t) => t.status === "running").length;
+  let slots = store.concurrency - running;
+  if (slots <= 0) return;
+  for (const t of store.tasks) {
+    if (slots <= 0) break;
+    if (t.status !== "queued") continue;
+    t.status = "running";
+    t.startedAt = Date.now();
+    slots--;
+    invoke("run_ffmpeg", { id: t.id, cmd: t.cmd, cwd: t.cwd || null }).catch((e) => {
+      t.status = "failed";
+      t.note = typeof e === "string" ? e : "启动失败";
+      pump();
+    });
+  }
 }
 
 function onProgress(p: FfmpegProgress) {
@@ -271,6 +302,7 @@ function onProgress(p: FfmpegProgress) {
     t.status = p.state;
     if (p.state === "done") t.progress = 100;
     t.startedAt = t.startedAt ?? Date.now();
+    t.finishedAt = Date.now();
   }
   if (p.state !== "running") pump();
 }
@@ -289,6 +321,7 @@ export function retryTask(id: string) {
     t.status = "queued";
     t.progress = 0;
     t.startedAt = null;
+    t.finishedAt = null;
     t.note = undefined;
     t.time = "";
     t.speed = "";
@@ -305,6 +338,70 @@ export function removeTask(id: string) {
 export function clearDone() {
   store.tasks.filter((t) => t.status === "done").forEach((t) => clearTaskLog(t.id));
   store.tasks = store.tasks.filter((t) => t.status !== "done");
+}
+
+// ===== 队列级控制 =====
+
+/** 暂停整个队列：已在进行中的任务继续跑完，但不再拉起新任务 */
+export function pauseQueue() {
+  store.paused = true;
+}
+
+/** 继续队列：解除暂停并立即尝试拉起等待中的任务 */
+export function resumeQueue() {
+  if (!store.paused) return;
+  store.paused = false;
+  pump();
+}
+
+/** 调整并发数（夹在 [MIN, MAX] 区间内），写盘后立即尝试拉起更多等待中的任务 */
+export function setConcurrency(n: number) {
+  const v = Math.max(
+    MIN_CONCURRENCY,
+    Math.min(MAX_CONCURRENCY, Math.floor(Number(n)) || MIN_CONCURRENCY)
+  );
+  store.concurrency = v;
+  try {
+    localStorage.setItem(CONCURRENCY_KEY, String(v));
+  } catch {
+    /* 忽略 */
+  }
+  if (!store.paused) pump();
+}
+
+/** 把所有失败/已取消的任务批量重置为排队并重跑 */
+export function retryAllFailed() {
+  store.tasks.forEach((t) => {
+    if (t.status === "failed" || t.status === "canceled") {
+      t.status = "queued";
+      t.progress = 0;
+      t.startedAt = null;
+      t.finishedAt = null;
+      t.note = undefined;
+      t.time = "";
+      t.speed = "";
+      clearTaskLog(t.id); // 上一轮输出不再保留，详情里只看本轮
+    }
+  });
+  pump();
+}
+
+/** 只移除失败/已取消的任务，保留排队中、进行中、已完成 */
+export function clearFailed() {
+  store.tasks
+    .filter((t) => t.status === "failed" || t.status === "canceled")
+    .forEach((t) => clearTaskLog(t.id));
+  store.tasks = store.tasks.filter(
+    (t) => t.status !== "failed" && t.status !== "canceled"
+  );
+}
+
+/** 一次性移除队列里所有任务（进行中的先取消） */
+export async function clearAll() {
+  const running = store.tasks.filter((t) => t.status === "running");
+  await Promise.all(running.map((t) => cancelTask(t.id).catch(() => {})));
+  store.tasks.forEach((t) => clearTaskLog(t.id));
+  store.tasks = [];
 }
 
 /** 读取任务已收集的 ffmpeg 输出日志（用于「详情」面板，运行中可反复调用） */

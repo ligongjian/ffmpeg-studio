@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { invoke } from "@tauri-apps/api/core";
-import { store, toggleTheme, saveSettings } from "../store";
+import { store, toggleTheme, saveSettings, setConcurrency, MIN_CONCURRENCY, MAX_CONCURRENCY } from "../store";
 import { FMT_OPTIONS } from "../lib/ffmpeg";
 
 async function applyPath() {
@@ -63,6 +63,13 @@ async function browse() {
           <label class="text-xs text-muted">默认 CRF</label>
           <input type="number" min="18" max="35" v-model.number="store.crf" @change="saveSettings()" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 focus:border-brand outline-none" />
           <p class="mt-1 text-xs text-muted">与「压缩优化」页的 CRF 联动</p>
+        </div>
+        <div>
+          <label class="text-xs text-muted">队列并行数</label>
+          <select v-model.number="store.concurrency" @change="setConcurrency(store.concurrency)" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 focus:border-brand outline-none">
+            <option v-for="n in (MAX_CONCURRENCY - MIN_CONCURRENCY + 1)" :key="n" :value="MIN_CONCURRENCY + n - 1">{{ MIN_CONCURRENCY + n - 1 }}{{ (MIN_CONCURRENCY + n - 1) === 1 ? '（串行）' : '' }}</option>
+          </select>
+          <p class="mt-1 text-xs text-muted">同时运行的任务数；机器多核且任务互不争资源时可调高</p>
         </div>
         <label class="flex items-center gap-2 cursor-pointer">
           <input type="checkbox" v-model="store.notifyOnDone" @change="saveSettings()" class="accent-brand" /> 完成后通知
