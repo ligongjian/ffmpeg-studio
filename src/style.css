@@ -81,6 +81,27 @@ body {
   accent-color: rgb(var(--brand));
 }
 
+/* ===== 全局按钮/文本链接的默认 hover 兜底 =====
+   特异性必须卡在「Tailwind preflight(.0.0.1)」和「Tailwind hover: 工具类(0.2.0)」之间：
+   - 高于 preflight 的 `button{background:transparent}` → 兜底底色才生效；
+   - 低于 hover: 工具类 → 已有 hover（如删除按钮的红色）不被覆盖。
+   `button:where(:not(:disabled)):hover` 恰为 (0.1.1)，满足条件。 */
+:where(button) {
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+button:where(:not(:disabled)):hover {
+  background-color: rgb(var(--brand) / 0.08);
+}
+/* 文本型链接（选择 / 应用并检测 等）：hover 淡出，不铺底色 */
+.lk {
+  cursor: pointer;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+.lk:hover {
+  background-color: transparent;
+  opacity: 0.65;
+}
+
 a:focus-visible,
 button:focus-visible,
 input:focus-visible,

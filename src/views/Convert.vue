@@ -85,7 +85,7 @@ const hwaccelUsable = computed(() => !audioOnly.value && !videoOnly.value && s.e
         <label class="text-sm font-semibold mb-2 block">源文件</label>
         <div class="rounded-xl border border-panel2 bg-ink/40 px-4 py-3 text-sm flex items-center justify-between">
           <span class="truncate">{{ store.inputFile || "demo_record.mov（示例）" }}</span>
-          <span class="text-brand text-xs cursor-pointer" @click="pickInput()">选择</span>
+          <span class="text-brand text-xs cursor-pointer lk" @click="pickInput()">选择</span>
         </div>
       </div>
 

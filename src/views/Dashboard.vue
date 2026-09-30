@@ -91,7 +91,7 @@ onUnmounted(() => {
         </div>
         <div
           ref="zone"
-          class="rounded-xl border-2 border-dashed border-panel2 bg-ink/40 p-8 text-center cursor-pointer hover:border-brand transition-colors"
+          class="rounded-xl border-2 border-dashed border-panel2 bg-ink/40 p-8 text-center cursor-pointer hover:border-brand hover:bg-brand/5 hover:shadow-glow transition-all"
           :class="{ 'drop-ring': dragOver }"
           @click="pickInput()"
         >

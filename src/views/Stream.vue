@@ -138,7 +138,7 @@ function enqueue() {
         <label class="text-sm font-semibold mb-2 block">源文件</label>
         <div class="rounded-xl border border-panel2 bg-ink/40 px-4 py-3 text-sm flex items-center justify-between">
           <span class="truncate">{{ store.inputFile || 'input.mp4（示例）' }}</span>
-          <span class="text-brand text-xs cursor-pointer" @click="pickInput()">选择</span>
+          <span class="text-brand text-xs cursor-pointer lk" @click="pickInput()">选择</span>
         </div>
       </div>
       <div
@@ -213,7 +213,7 @@ function enqueue() {
             <label class="text-xs text-muted">保存目录</label>
             <div class="rounded-xl border border-panel2 bg-ink/40 px-4 py-2.5 text-sm flex items-center justify-between mt-1">
               <span class="truncate">{{ outDirDisplay }}</span>
-              <span class="text-brand text-xs cursor-pointer" @click="pickDir()">选择</span>
+              <span class="text-brand text-xs cursor-pointer lk" @click="pickDir()">选择</span>
             </div>
           </div>
           <div>

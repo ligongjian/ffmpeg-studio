@@ -114,7 +114,7 @@ function streamDetail(st: StreamInfo): string {
       <div v-for="p in panels" :key="p.key" class="card rounded-2xl p-5 space-y-4">
         <div class="flex items-center justify-between">
           <span class="text-xs font-semibold px-2 py-0.5 rounded bg-panel2 text-muted uppercase">{{ p.key === 'a' ? '文件 A' : '文件 B' }}</span>
-          <span class="text-brand text-xs cursor-pointer" @click="pick(p.key)">选择文件</span>
+          <span class="text-brand text-xs cursor-pointer lk" @click="pick(p.key)">选择文件</span>
         </div>
 
         <div class="rounded-xl border border-panel2 bg-ink/40 px-4 py-3 text-sm break-all">

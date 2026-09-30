@@ -254,7 +254,7 @@ function normalize() {
         <label class="text-sm font-semibold mb-2 block">源文件</label>
         <div class="rounded-xl border border-panel2 bg-ink/40 px-4 py-3 text-sm flex items-center justify-between">
           <span class="truncate">{{ store.inputFile || "input.mp4（未选择）" }}</span>
-          <span class="text-brand text-xs cursor-pointer" @click="pickInput()">选择</span>
+          <span class="text-brand text-xs cursor-pointer lk" @click="pickInput()">选择</span>
         </div>
       </div>
 
@@ -385,7 +385,7 @@ function normalize() {
       <p v-if="!ready" class="text-[11px] text-muted mt-3 flex items-center gap-1 flex-wrap">
         <template v-if="!store.inputFile">
           <span>时间轴要先选择输入文件，才能按真实时长绘制。</span>
-          <button class="text-brand underline cursor-pointer" @click="pickInput()">选择文件</button>
+          <button class="text-brand underline cursor-pointer lk" @click="pickInput()">选择文件</button>
         </template>
         <template v-else>
           <span class="text-red-400">{{ probeMsg || "无法读取该文件的时长。" }}</span>

@@ -167,7 +167,7 @@ async function pickSub() {
             <template v-if="store.inputFile">{{ inputName }}</template>
             <template v-else>未选择文件</template>
           </span>
-          <span class="text-brand text-xs cursor-pointer" @click="pickInput()">选择</span>
+          <span class="text-brand text-xs cursor-pointer lk" @click="pickInput()">选择</span>
         </div>
       </div>
 
@@ -188,7 +188,7 @@ async function pickSub() {
           <label class="text-xs text-muted">水印图片</label>
           <div class="mt-1 rounded-lg border border-panel2 bg-ink/40 px-4 py-3 flex items-center justify-between gap-3">
             <span class="truncate text-xs" :class="s.image ? '' : 'text-muted'">{{ s.image || "未选择图片（png/jpg）" }}</span>
-            <span class="text-brand text-xs cursor-pointer shrink-0" @click="pickImage()">选择</span>
+            <span class="text-brand text-xs cursor-pointer shrink-0 lk" @click="pickImage()">选择</span>
           </div>
         </div>
 
@@ -318,7 +318,7 @@ async function pickSub() {
           <label class="text-xs text-muted">字幕文件</label>
           <div class="mt-1 rounded-lg border border-panel2 bg-ink/40 px-4 py-3 flex items-center justify-between gap-3">
             <span class="truncate text-xs" :class="s.sub ? '' : 'text-muted'">{{ s.sub || "未选择字幕（srt/ass）" }}</span>
-            <span class="text-brand text-xs cursor-pointer shrink-0" @click="pickSub()">选择</span>
+            <span class="text-brand text-xs cursor-pointer shrink-0 lk" @click="pickSub()">选择</span>
           </div>
         </div>
 

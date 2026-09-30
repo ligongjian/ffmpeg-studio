@@ -105,7 +105,7 @@ const cmd = computed(() =>
             </template>
             <template v-else>未选择文件</template>
           </span>
-          <span class="text-brand text-xs cursor-pointer" @click="pickInput()">选择</span>
+          <span class="text-brand text-xs cursor-pointer lk" @click="pickInput()">选择</span>
         </div>
       </div>
 

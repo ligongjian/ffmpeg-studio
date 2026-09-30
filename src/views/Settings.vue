@@ -38,7 +38,7 @@ async function browse() {
           <input v-model="store.ffmpegPath" class="flex-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none font-mono" />
           <button class="px-3 py-2 rounded-lg border border-panel2 text-sm hover:border-brand cursor-pointer" @click="browse">浏览</button>
         </div>
-        <button class="mt-2 text-xs text-brand cursor-pointer" @click="applyPath">应用并检测</button>
+        <button class="mt-2 text-xs text-brand cursor-pointer lk" @click="applyPath">应用并检测</button>
       </div>
       <div class="flex items-center justify-between rounded-lg bg-ink/50 px-4 py-3">
         <div>

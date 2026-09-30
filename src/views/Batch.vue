@@ -116,7 +116,7 @@ async function copyAll() {
     <!-- 文件来源 -->
     <div class="card rounded-2xl p-5 space-y-4">
       <div
-        class="rounded-xl border-2 border-dashed border-panel2 bg-ink/40 p-6 text-center cursor-pointer hover:border-brand transition-colors"
+        class="rounded-xl border-2 border-dashed border-panel2 bg-ink/40 p-6 text-center cursor-pointer hover:border-brand hover:bg-brand/5 hover:shadow-glow transition-all"
         @click="addFiles"
       >
         <div class="font-semibold">+ 点击选择多个文件进行批量处理</div>
