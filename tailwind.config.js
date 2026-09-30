@@ -16,6 +16,10 @@ export default {
         brandd: "rgb(var(--brand-h) / <alpha-value>)",
         chalk: "rgb(var(--text) / <alpha-value>)",
         muted: "rgb(var(--muted) / <alpha-value>)",
+        // 状态色：随主题切换（亮色 600 系 / 暗色 400 系），别再写死 red-500 / amber-500
+        ok: "rgb(var(--ok) / <alpha-value>)",
+        warn: "rgb(var(--warn) / <alpha-value>)",
+        err: "rgb(var(--err) / <alpha-value>)",
       },
       boxShadow: {
         glow:

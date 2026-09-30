@@ -101,7 +101,7 @@ const cmd = computed(() =>
             <template v-else-if="store.inputFile">
               {{ inputName }}
               <span v-if="store.inputProbing" class="text-muted"> · 读取中…</span>
-              <span v-else class="text-red-400"> · {{ store.inputProbeErr || "读取失败" }}</span>
+              <span v-else class="text-err"> · {{ store.inputProbeErr || "读取失败" }}</span>
             </template>
             <template v-else>未选择文件</template>
           </span>

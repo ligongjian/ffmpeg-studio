@@ -266,7 +266,7 @@ function streamDetail(st: StreamInfo): string {
         </div>
 
         <div v-if="p.slot.probing" class="text-sm text-muted">读取中…</div>
-        <div v-else-if="p.slot.err" class="text-sm text-red-400">{{ p.slot.err }}</div>
+        <div v-else-if="p.slot.err" class="text-sm text-err">{{ p.slot.err }}</div>
         <div v-else-if="p.slot.info" class="space-y-4">
           <div class="rounded-xl border border-panel2 overflow-hidden">
             <table class="info-table">
@@ -346,8 +346,8 @@ function streamDetail(st: StreamInfo): string {
                         class="text-[10px] font-bold px-1.5 py-0.5 rounded"
                         :class="{
                           'bg-brand/20 text-brand': st.codecType === 'video',
-                          'bg-emerald-500/20 text-emerald-400': st.codecType === 'audio',
-                          'bg-amber-500/20 text-amber-400': st.codecType === 'subtitle',
+                          'bg-emerald-500/20 text-ok': st.codecType === 'audio',
+                          'bg-amber-500/20 text-warn': st.codecType === 'subtitle',
                           'bg-panel2 text-muted': st.codecType !== 'video' && st.codecType !== 'audio' && st.codecType !== 'subtitle',
                         }"
                       >{{ TYPE_LABEL[st.codecType] || st.codecType }}</span>

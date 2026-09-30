@@ -388,7 +388,7 @@ function normalize() {
           <button class="text-brand underline cursor-pointer lk" @click="pickInput()">选择文件</button>
         </template>
         <template v-else>
-          <span class="text-red-400">{{ probeMsg || "无法读取该文件的时长。" }}</span>
+          <span class="text-err">{{ probeMsg || "无法读取该文件的时长。" }}</span>
           <span>下方时间框仍可直接编辑。</span>
         </template>
       </p>

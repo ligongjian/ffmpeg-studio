@@ -78,7 +78,7 @@ onUnmounted(() => {
       </div>
       <div class="card rounded-2xl p-4">
         <div class="text-xs text-muted">失败</div>
-        <div class="text-2xl font-extrabold mt-1" :class="failedCount ? 'text-red-400' : ''">{{ failedCount }}</div>
+        <div class="text-2xl font-extrabold mt-1" :class="failedCount ? 'text-err' : ''">{{ failedCount }}</div>
         <div class="text-xs text-muted mt-1">需重试 / 处理</div>
       </div>
     </div>

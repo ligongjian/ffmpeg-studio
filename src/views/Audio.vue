@@ -289,7 +289,7 @@ const cmd = computed(() =>
           <div v-for="(f, i) in s.files" :key="f" class="flex items-center gap-3 bg-ink/50 rounded-lg px-3 py-2 text-sm">
             <span class="text-muted w-6 text-right shrink-0">{{ i + 1 }}</span>
             <div class="min-w-0 flex-1 truncate">{{ f.split(/[\\/]/).pop() }}</div>
-            <button class="shrink-0 w-7 h-7 rounded-lg bg-panel2 hover:bg-red-500/30 text-muted hover:text-red-300 transition-colors cursor-pointer" @click="removeAt(i)">×</button>
+            <button class="shrink-0 w-7 h-7 rounded-lg bg-panel2 hover:bg-red-500/30 text-muted hover:text-err transition-colors cursor-pointer" @click="removeAt(i)">×</button>
           </div>
         </div>
         <p v-if="s.files.length && totalDurationText" class="text-[11px] text-muted">
@@ -353,7 +353,7 @@ const cmd = computed(() =>
           <div>
             <label class="text-xs text-muted">淡出时长（秒，0 = 不淡出）</label>
             <input type="number" min="0" step="0.5" v-model.number="s.fadeOut" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" />
-            <p v-if="s.fadeOut > 0 && !fadeOutReady" class="mt-1 text-[11px] text-amber-500">
+            <p v-if="s.fadeOut > 0 && !fadeOutReady" class="mt-1 text-[11px] text-warn">
               淡出起点需总时长；选择文件并探测后自动确定
             </p>
           </div>

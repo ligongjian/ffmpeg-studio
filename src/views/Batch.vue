@@ -161,7 +161,7 @@ async function copyAll() {
             <div class="text-xs text-muted truncate">{{ f }}</div>
           </div>
           <button
-            class="shrink-0 w-7 h-7 rounded-lg bg-panel2 hover:bg-red-500/30 text-muted hover:text-red-300 transition-colors cursor-pointer"
+            class="shrink-0 w-7 h-7 rounded-lg bg-panel2 hover:bg-red-500/30 text-muted hover:text-err transition-colors cursor-pointer"
             title="移除"
             @click="removeAt(i)"
           >

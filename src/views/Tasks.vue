@@ -15,11 +15,11 @@ import {
 } from "../store";
 
 const STATUS: Record<string, { label: string; color: string; dot: string }> = {
-  queued: { label: "排队中", color: "text-amber-500", dot: "bg-amber-500" },
+  queued: { label: "排队中", color: "text-warn", dot: "bg-amber-500" },
   running: { label: "进行中", color: "text-brand", dot: "bg-brand" },
-  done: { label: "已完成", color: "text-emerald-500", dot: "bg-emerald-500" },
-  canceled: { label: "已取消", color: "text-red-500", dot: "bg-red-500" },
-  failed: { label: "失败", color: "text-red-500", dot: "bg-red-500" },
+  done: { label: "已完成", color: "text-ok", dot: "bg-emerald-500" },
+  canceled: { label: "已取消", color: "text-err", dot: "bg-red-500" },
+  failed: { label: "失败", color: "text-err", dot: "bg-red-500" },
 };
 
 const st = (s: string) => STATUS[s] || STATUS.queued;
@@ -186,7 +186,7 @@ async function copy(text: string, which: "cmd" | "log") {
           <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
           清空失败
         </button>
-        <button class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-panel2 text-sm hover:border-red-500 hover:text-red-500 hover:bg-red-500/5 cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed" :disabled="stats.total === 0" @click="confirmClearAll">
+        <button class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-panel2 text-sm hover:border-err hover:text-err hover:bg-red-500/5 cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed" :disabled="stats.total === 0" @click="confirmClearAll">
           <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
           清空全部
         </button>
@@ -197,14 +197,14 @@ async function copy(text: string, which: "cmd" | "log") {
       </div>
     </div>
 
-    <div v-if="store.paused" class="text-xs text-amber-500">队列已暂停：进行中的任务会继续跑完，但不会再拉起新任务。点「继续队列」恢复。</div>
+    <div v-if="store.paused" class="text-xs text-warn">队列已暂停：进行中的任务会继续跑完，但不会再拉起新任务。点「继续队列」恢复。</div>
 
     <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
       <div class="card rounded-xl p-3"><div class="text-xs text-muted">总任务</div><div class="text-xl font-extrabold mt-0.5">{{ stats.total }}</div></div>
-      <div class="card rounded-xl p-3"><div class="text-xs text-muted">排队中</div><div class="text-xl font-extrabold mt-0.5 text-amber-500">{{ stats.queued }}</div></div>
+      <div class="card rounded-xl p-3"><div class="text-xs text-muted">排队中</div><div class="text-xl font-extrabold mt-0.5 text-warn">{{ stats.queued }}</div></div>
       <div class="card rounded-xl p-3"><div class="text-xs text-muted">进行中</div><div class="text-xl font-extrabold mt-0.5 text-brand">{{ stats.run }}</div></div>
-      <div class="card rounded-xl p-3"><div class="text-xs text-muted">已完成</div><div class="text-xl font-extrabold mt-0.5 text-emerald-500">{{ stats.done }}</div></div>
-      <div class="card rounded-xl p-3"><div class="text-xs text-muted">失败/取消</div><div class="text-xl font-extrabold mt-0.5 text-red-500">{{ stats.failed }}</div></div>
+      <div class="card rounded-xl p-3"><div class="text-xs text-muted">已完成</div><div class="text-xl font-extrabold mt-0.5 text-ok">{{ stats.done }}</div></div>
+      <div class="card rounded-xl p-3"><div class="text-xs text-muted">失败/取消</div><div class="text-xl font-extrabold mt-0.5 text-err">{{ stats.failed }}</div></div>
     </div>
 
     <div v-if="store.tasks.length" class="space-y-2">
@@ -220,7 +220,7 @@ async function copy(text: string, which: "cmd" | "log") {
               <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
               详情
             </button>
-            <button v-if="t.status === 'running'" class="inline-flex items-center gap-1 text-xs text-muted hover:text-red-500 hover:bg-red-500/10 rounded-md px-1.5 py-1 transition-colors cursor-pointer" @click="cancelTask(t.id)">
+            <button v-if="t.status === 'running'" class="inline-flex items-center gap-1 text-xs text-muted hover:text-err hover:bg-red-500/10 rounded-md px-1.5 py-1 transition-colors cursor-pointer" @click="cancelTask(t.id)">
               <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
               取消
             </button>
@@ -242,7 +242,7 @@ async function copy(text: string, which: "cmd" | "log") {
             <template v-else-if="t.status === 'queued'">等待中…</template>
             <template v-else-if="t.status === 'done'">处理完成</template>
             <template v-else-if="t.status === 'canceled'">已取消</template>
-            <template v-else><span class="text-red-500">执行失败：{{ t.note || "见详情日志" }}</span></template>
+            <template v-else><span class="text-err">执行失败：{{ t.note || "见详情日志" }}</span></template>
           </span>
           <span v-if="t.startedAt" class="shrink-0 whitespace-nowrap">
             开始 <span class="font-mono text-chalk/80">{{ fmtTime(t.startedAt) }}</span>
@@ -293,7 +293,7 @@ async function copy(text: string, which: "cmd" | "log") {
                 <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               </button>
             </div>
-            <div v-if="detailTask.note" class="mt-3 text-xs rounded-lg bg-red-500/10 text-red-500 px-3 py-2 break-all">{{ detailTask.note }}</div>
+            <div v-if="detailTask.note" class="mt-3 text-xs rounded-lg bg-red-500/10 text-err px-3 py-2 break-all">{{ detailTask.note }}</div>
           </header>
 
           <!-- 完整命令 -->

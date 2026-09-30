@@ -369,7 +369,7 @@ const canStart = computed(
     <!-- 录制中状态条：置顶醒目，避免用户在录着录着被别的设置分散注意力 -->
     <div
       v-if="store.recording"
-      class="card rounded-2xl p-5 border-red-500/40 bg-red-500/5 flex items-center gap-4"
+      class="card rounded-2xl p-5 border-err/40 bg-red-500/5 flex items-center gap-4"
     >
       <span class="relative flex h-3 w-3">
         <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
@@ -377,7 +377,7 @@ const canStart = computed(
       </span>
       <div class="flex-1 min-w-0">
         <div class="text-sm font-semibold flex items-center gap-2">
-          <span class="text-red-400">正在录制</span>
+          <span class="text-err">正在录制</span>
           <span class="text-muted text-xs">· {{ modeLabel }}</span>
         </div>
         <div class="text-xs text-muted mt-0.5 truncate">
@@ -415,9 +415,9 @@ const canStart = computed(
       v-else-if="finishedInfo"
       class="card rounded-2xl p-4 flex items-center gap-3"
       :class="{
-        'border-emerald-500/40 bg-emerald-500/5': finishedInfo.type === 'ok',
-        'border-red-500/40 bg-red-500/5': finishedInfo.type === 'err',
-        'border-amber-500/40 bg-amber-500/5': finishedInfo.type === 'warn',
+        'border-ok/40 bg-emerald-500/5': finishedInfo.type === 'ok',
+        'border-err/40 bg-red-500/5': finishedInfo.type === 'err',
+        'border-warn/40 bg-amber-500/5': finishedInfo.type === 'warn',
       }"
     >
       <span
@@ -489,7 +489,7 @@ const canStart = computed(
             </option>
           </select>
           <div v-else-if="enumerating.displays" class="text-xs text-muted mt-1">枚举中…</div>
-          <div v-else class="text-xs text-amber-500 mt-1">{{ enumErr.displays || "未检测到显示器" }}</div>
+          <div v-else class="text-xs text-warn mt-1">{{ enumErr.displays || "未检测到显示器" }}</div>
         </div>
         <div>
           <label class="text-xs text-muted">分辨率（-video_size）</label>
@@ -515,7 +515,7 @@ const canStart = computed(
             <option v-for="c in cameras" :key="c.identifier" :value="c.identifier">{{ c.name }}</option>
           </select>
           <div v-else-if="enumerating.devices" class="text-xs text-muted mt-1">枚举中…</div>
-          <div v-else class="text-xs text-amber-500 mt-1">{{ enumErr.devices || "未检测到摄像头" }}</div>
+          <div v-else class="text-xs text-warn mt-1">{{ enumErr.devices || "未检测到摄像头" }}</div>
         </div>
         <!-- 画中画时摄像头画面大小 -->
         <div v-if="s.mode === 'both'">
@@ -540,7 +540,7 @@ const canStart = computed(
             <option value="system">系统音频（屏幕录制）</option>
             <option value="none">无声</option>
           </select>
-          <p v-if="s.audioSource === 'system'" class="text-[11px] text-amber-500 mt-1">
+          <p v-if="s.audioSource === 'system'" class="text-[11px] text-warn mt-1">
             系统音频需要虚拟音频线（VB-Cable / Stereo Mix），普通麦克风无法捕获
           </p>
         </div>
@@ -553,7 +553,7 @@ const canStart = computed(
           >
             <option v-for="m in mics" :key="m.identifier" :value="m.identifier">{{ m.name }}</option>
           </select>
-          <div v-else class="text-xs text-amber-500 mt-1">未检测到麦克风</div>
+          <div v-else class="text-xs text-warn mt-1">未检测到麦克风</div>
         </div>
       </div>
 

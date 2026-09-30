@@ -165,7 +165,7 @@ function fmtDuration(s: number): string {
             <template v-else-if="store.inputFile">
               {{ inputName }}
               <span v-if="store.inputProbing" class="text-muted"> · 读取中…</span>
-              <span v-else class="text-red-400"> · {{ store.inputProbeErr || "读取失败" }}</span>
+              <span v-else class="text-err"> · {{ store.inputProbeErr || "读取失败" }}</span>
             </template>
             <template v-else>未选择文件</template>
           </span>
@@ -231,7 +231,7 @@ function fmtDuration(s: number): string {
           <div class="text-muted text-xs">预估输出</div>
           <div v-if="estBytes !== null" class="font-bold mt-0.5">
             约 {{ fmtBytes(estBytes) }}
-            <span v-if="savingsPct !== null" :class="savingsPct >= 0 ? 'text-brand' : 'text-red-400'">
+            <span v-if="savingsPct !== null" :class="savingsPct >= 0 ? 'text-brand' : 'text-err'">
               {{ savingsPct >= 0 ? `↓ 节省 ${savingsPct}%` : `↑ 增大 ${Math.abs(savingsPct)}%` }}
             </span>
           </div>

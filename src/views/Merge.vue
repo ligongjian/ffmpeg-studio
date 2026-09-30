@@ -171,7 +171,7 @@ async function run() {
           </span>
           <button
             v-if="files.length"
-            class="text-muted hover:text-red-400 underline cursor-pointer"
+            class="text-muted hover:text-err underline cursor-pointer"
             @click="clearAll"
           >清空</button>
         </div>
@@ -198,7 +198,7 @@ async function run() {
           </span>
           <button class="text-muted hover:text-brand disabled:opacity-30 cursor-pointer" :disabled="i === 0" title="上移" @click="move(f.id, -1)">↑</button>
           <button class="text-muted hover:text-brand disabled:opacity-30 cursor-pointer" :disabled="i === files.length - 1" title="下移" @click="move(f.id, 1)">↓</button>
-          <button class="text-muted hover:text-red-400 cursor-pointer" title="移除" @click="removeFile(f.id)">✕</button>
+          <button class="text-muted hover:text-err cursor-pointer" title="移除" @click="removeFile(f.id)">✕</button>
         </div>
       </div>
 
