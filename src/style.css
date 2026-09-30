@@ -46,8 +46,9 @@ body {
 }
 
 .nav-active {
-  background: linear-gradient(90deg, rgb(var(--brand) / 0.14), rgb(var(--brand) / 0));
-  color: rgb(var(--text));
+  background: linear-gradient(90deg, rgb(var(--brand) / 0.22), rgb(var(--brand) / 0.10));
+  color: rgb(var(--brand));
+  box-shadow: inset 3px 0 0 0 rgb(var(--brand));
 }
 .nav-active .nav-ico {
   color: rgb(var(--brand));
