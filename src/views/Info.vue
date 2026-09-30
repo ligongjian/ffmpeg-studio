@@ -268,43 +268,103 @@ function streamDetail(st: StreamInfo): string {
         <div v-if="p.slot.probing" class="text-sm text-muted">读取中…</div>
         <div v-else-if="p.slot.err" class="text-sm text-red-400">{{ p.slot.err }}</div>
         <div v-else-if="p.slot.info" class="space-y-4">
-          <div class="grid grid-cols-3 gap-3 text-center">
-            <div class="rounded-lg bg-ink/50 py-2">
-              <div class="text-[11px] text-muted">封装</div>
-              <div class="text-sm font-semibold truncate">{{ p.slot.info.formatName || "—" }}</div>
-            </div>
-            <div class="rounded-lg bg-ink/50 py-2">
-              <div class="text-[11px] text-muted">时长</div>
-              <div class="text-sm font-semibold">{{ fmtDuration(p.slot.info.duration) }}</div>
-            </div>
-            <div class="rounded-lg bg-ink/50 py-2">
-              <div class="text-[11px] text-muted">大小</div>
-              <div class="text-sm font-semibold">{{ fmtBytes(p.slot.info.size) }}</div>
-            </div>
+          <div class="rounded-xl border border-panel2 overflow-hidden">
+            <table class="info-table">
+              <thead>
+                <tr>
+                  <th style="width: 92px">属性</th>
+                  <th>值</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="k">封装格式</td>
+                  <td :title="p.slot.info.formatLongName || ''">
+                    {{ p.slot.info.formatName || "—" }}
+                    <span v-if="p.slot.info.formatLongName" class="text-xs text-muted"> · {{ p.slot.info.formatLongName }}</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="k">时长</td>
+                  <td class="font-mono">{{ fmtDuration(p.slot.info.duration) }}</td>
+                </tr>
+                <tr>
+                  <td class="k">文件大小</td>
+                  <td class="font-mono">{{ fmtBytes(p.slot.info.size) }}</td>
+                </tr>
+                <tr>
+                  <td class="k">分辨率</td>
+                  <td class="font-mono">
+                    {{ p.slot.info.videoWidth && p.slot.info.videoHeight ? `${p.slot.info.videoWidth}×${p.slot.info.videoHeight}` : "—" }}
+                  </td>
+                </tr>
+                <tr>
+                  <td class="k">帧率</td>
+                  <td class="font-mono">{{ fmtFps(p.slot.info.videoFps) }}</td>
+                </tr>
+                <tr>
+                  <td class="k">总码率</td>
+                  <td class="font-mono">{{ fmtKbps(p.slot.info.bitRate || p.slot.info.videoBitrate) || "—" }}</td>
+                </tr>
+                <tr v-if="p.slot.info.startTime">
+                  <td class="k">起始时间</td>
+                  <td class="font-mono">{{ Number(p.slot.info.startTime.toFixed(3)) }} s</td>
+                </tr>
+                <tr>
+                  <td class="k">流构成</td>
+                  <td>{{ streamSummary(p.slot.info.streams) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div v-if="p.slot.info.tags?.length" class="flex flex-wrap gap-2">
+            <span
+              v-for="t in p.slot.info.tags"
+              :key="t.key"
+              class="text-[11px] px-2 py-0.5 rounded bg-panel2 text-muted"
+            >{{ TAG_LABEL[t.key] || t.key }}：{{ t.value }}</span>
           </div>
 
           <div>
             <div class="text-xs text-muted mb-2">流（{{ p.slot.info.streams.length }}）</div>
-            <div class="space-y-2 max-h-80 overflow-y-auto pr-1">
-              <div
-                v-for="st in p.slot.info.streams"
-                :key="st.index"
-                class="rounded-lg bg-ink/50 px-3 py-2 text-sm flex items-start gap-3"
-              >
-                <span
-                  class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded mt-0.5"
-                  :class="{
-                    'bg-brand/20 text-brand': st.codecType === 'video',
-                    'bg-emerald-500/20 text-emerald-400': st.codecType === 'audio',
-                    'bg-amber-500/20 text-amber-400': st.codecType === 'subtitle',
-                    'bg-panel2 text-muted': st.codecType !== 'video' && st.codecType !== 'audio' && st.codecType !== 'subtitle',
-                  }"
-                >{{ TYPE_LABEL[st.codecType] || st.codecType }}</span>
-                <div class="min-w-0 flex-1">
-                  <div class="font-medium truncate">#{{ st.index }} {{ st.codecName }}</div>
-                  <div class="text-xs text-muted truncate">{{ streamDetail(st) }}</div>
-                </div>
-              </div>
+            <div class="rounded-xl border border-panel2 overflow-hidden max-h-80 overflow-y-auto">
+              <table class="info-table">
+                <thead>
+                  <tr>
+                    <th style="width: 56px">类型</th>
+                    <th style="width: 30px">#</th>
+                    <th>编码</th>
+                    <th>详情</th>
+                    <th style="width: 64px">语言</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="st in p.slot.info.streams" :key="st.index">
+                    <td>
+                      <span
+                        class="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                        :class="{
+                          'bg-brand/20 text-brand': st.codecType === 'video',
+                          'bg-emerald-500/20 text-emerald-400': st.codecType === 'audio',
+                          'bg-amber-500/20 text-amber-400': st.codecType === 'subtitle',
+                          'bg-panel2 text-muted': st.codecType !== 'video' && st.codecType !== 'audio' && st.codecType !== 'subtitle',
+                        }"
+                      >{{ TYPE_LABEL[st.codecType] || st.codecType }}</span>
+                    </td>
+                    <td class="text-muted font-mono">{{ st.index }}</td>
+                    <td>
+                      <div class="font-medium">{{ st.codecName }}</div>
+                      <div v-if="st.codecLongName" class="text-[11px] text-muted">{{ st.codecLongName }}</div>
+                    </td>
+                    <td>
+                      <div class="text-xs text-muted">{{ streamDetail(st) }}</div>
+                      <div v-if="st.title" class="text-[11px] text-muted">标题：{{ st.title }}</div>
+                    </td>
+                    <td class="text-xs">{{ st.language && st.language !== 'und' ? langLabel(st.language) : '—' }}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

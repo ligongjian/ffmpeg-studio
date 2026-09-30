@@ -78,6 +78,45 @@ body {
   outline: 2px dashed rgb(var(--brand));
   outline-offset: 4px;
 }
+/* ===== 信息表格（媒体信息页的属性表 / 流列表）===== */
+.info-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+.info-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgb(var(--muted));
+  padding: 6px 10px;
+  /* 底色用不透明的卡片色，再叠一层 4% 淡色：流列表可滚动时表头吸顶也不会透出内容 */
+  background-color: rgb(var(--panel));
+  background-image: linear-gradient(rgb(var(--text) / 0.04), rgb(var(--text) / 0.04));
+  border-bottom: 1px solid rgb(var(--line));
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.info-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid rgb(var(--line));
+  vertical-align: top;
+}
+.info-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.info-table tbody tr:hover td {
+  background: rgb(var(--brand) / 0.05);
+}
+/* 属性表的键列：次要色、不换行，值列自动占满剩余宽度 */
+.info-table .k {
+  color: rgb(var(--muted));
+  white-space: nowrap;
+  width: 1%;
+}
 .slider {
   accent-color: rgb(var(--brand));
 }
