@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { reactive, computed, watch } from "vue";
+import { reactive, computed, watch, ref, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { store, pickInput, probeInput } from "../store";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { store, pickInput, probeInput, setInputFile } from "../store";
 import { buildAudio, AUDIO_ONLY_FMT } from "../lib/ffmpeg";
 import { baseName } from "../lib/format";
 import CommandCard from "../components/CommandCard.vue";
@@ -88,6 +89,76 @@ function removeAt(i: number) {
   delete s.fileDurs[f];
   s.files.splice(i, 1);
 }
+
+// 拼接模式下拖入文件：逐个去重并探测时长（与 addFiles 逻辑一致）
+async function addPaths(paths: string[]) {
+  const have = new Set(s.files.map((f) => f.toLowerCase()));
+  for (const f of paths) {
+    if (!have.has(f.toLowerCase())) {
+      s.files.push(f);
+      have.add(f.toLowerCase());
+      invoke<{ duration: number }>("probe_media_info", { path: f })
+        .then((info) => {
+          s.fileDurs[f] = info?.duration || 0;
+        })
+        .catch(() => {
+          s.fileDurs[f] = 0;
+        });
+    }
+  }
+}
+
+// 秒 → m:ss，用于显示已选文件时长
+function formatDur(d: number): string {
+  if (!d) return "";
+  const m = Math.floor(d / 60);
+  const x = Math.round(d % 60);
+  return `${m}:${String(x).padStart(2, "0")}`;
+}
+
+// 拖放区：Tauri 在 webview 层拦截系统文件拖拽，只能经由 onDragDropEvent 拿真实路径
+const zone = ref<HTMLElement | null>(null);
+const zoneConcat = ref<HTMLElement | null>(null);
+const dragOver = ref(false);
+const dragOverConcat = ref(false);
+let unlisten: (() => void) | null = null;
+
+/** 事件里的 position 是物理像素，换算成 CSS 像素后判断指针是否落在某拖放区内 */
+function inZone(el: HTMLElement | null, pos: { x: number; y: number }): boolean {
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const x = pos.x / dpr;
+  const y = pos.y / dpr;
+  return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+}
+
+onMounted(async () => {
+  unlisten = await getCurrentWebview().onDragDropEvent((event) => {
+    const p = event.payload;
+    if (p.type === "enter" || p.type === "over") {
+      dragOver.value = s.mode === "process" && inZone(zone.value, p.position);
+      dragOverConcat.value = s.mode === "concat" && inZone(zoneConcat.value, p.position);
+    } else if (p.type === "drop") {
+      dragOver.value = false;
+      dragOverConcat.value = false;
+      if (!p.paths.length) return;
+      if (s.mode === "process" && inZone(zone.value, p.position)) {
+        setInputFile(p.paths[0]);
+      } else if (s.mode === "concat" && inZone(zoneConcat.value, p.position)) {
+        addPaths(p.paths);
+      }
+    } else {
+      dragOver.value = false;
+      dragOverConcat.value = false;
+    }
+  });
+});
+
+onUnmounted(() => {
+  unlisten?.();
+  unlisten = null;
+});
 
 // WAV 是 PCM 无损，「音质档位」对它没有意义
 const qualityUsable = computed(() => s.outFmt !== "wav");
@@ -195,10 +266,24 @@ const cmd = computed(() =>
       <!-- 处理模式 -->
       <template v-if="s.mode === 'process'">
         <div>
-          <label class="text-sm font-semibold mb-2 block">源文件</label>
-          <div class="rounded-xl border border-panel2 bg-ink/40 px-4 py-3 text-sm flex items-center justify-between">
-            <span class="truncate">{{ store.inputFile || "未选择文件" }}</span>
-            <span class="text-brand text-xs cursor-pointer" @click="pickInput()">选择</span>
+          <label class="text-sm font-semibold mb-2 block">输入选择（源文件）</label>
+          <div
+            ref="zone"
+            class="rounded-xl border-2 border-dashed px-4 py-6 text-sm flex flex-col items-center justify-center gap-2 cursor-pointer transition-all"
+            :class="dragOver ? 'border-brand bg-brand/10 shadow-glow' : 'border-panel2 bg-ink/40 hover:border-brand hover:bg-brand/5 hover:shadow-glow'"
+            @click="pickInput()"
+          >
+            <template v-if="store.inputFile">
+              <div class="font-medium truncate max-w-full">{{ store.inputFile.split(/[\\/]/).pop() }}</div>
+              <div v-if="store.inputInfo?.duration" class="text-[11px] text-muted">
+                时长 {{ formatDur(store.inputInfo.duration) }}<template v-if="store.inputInfo.size"> · {{ (store.inputInfo.size / 1048576).toFixed(1) }} MB</template>
+              </div>
+              <span class="text-brand text-xs">重新选择 / 拖拽替换</span>
+            </template>
+            <template v-else>
+              <div class="font-medium">点击或拖拽选择音频文件</div>
+              <div class="text-[11px] text-muted">支持 MP3 / WAV / M4A / FLAC / Opus 等</div>
+            </template>
           </div>
         </div>
 
@@ -263,11 +348,14 @@ const cmd = computed(() =>
       <!-- 拼接模式 -->
       <template v-else>
         <div
-          class="rounded-xl border-2 border-dashed border-panel2 bg-ink/40 p-4 text-center cursor-pointer hover:border-brand transition-colors"
+          ref="zoneConcat"
+          class="rounded-xl border-2 border-dashed px-4 py-6 text-center cursor-pointer transition-all"
+          :class="dragOverConcat ? 'border-brand bg-brand/10 shadow-glow' : 'border-panel2 bg-ink/40 hover:border-brand hover:bg-brand/5 hover:shadow-glow'"
           @click="addFiles"
         >
           <div class="font-semibold text-sm">+ 添加音频文件</div>
           <div class="text-xs text-muted mt-1">已选择 {{ s.files.length }} 个文件（按顺序排列）</div>
+          <div class="text-[11px] text-muted mt-1">也可直接把文件拖拽到此处</div>
         </div>
         <div v-if="s.files.length" class="space-y-2 max-h-48 overflow-y-auto pr-1">
           <div v-for="(f, i) in s.files" :key="f" class="flex items-center gap-3 bg-ink/50 rounded-lg px-3 py-2 text-sm">

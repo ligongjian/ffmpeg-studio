@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { reactive, computed, watch } from "vue";
-import { store, pickInput, probeInput, inputCwd } from "../store";
+import { reactive, computed, watch, ref, onMounted, onUnmounted } from "vue";
+import { store, pickInput, probeInput, inputCwd, setInputFile } from "../store";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { buildFilters, type FiltersOpts } from "../lib/ffmpeg";
 import { baseName } from "../lib/format";
 import CommandCard from "../components/CommandCard.vue";
 
 const s = reactive<{
-  input: string;
   fmt: string;
   vEnc: string;
   crf: number;
@@ -24,7 +24,6 @@ const s = reactive<{
   customVf: string;
   customAf: string;
 }>( {
-  input: "",
   fmt: "mp4",
   vEnc: "libx264",
   crf: 23,
@@ -43,19 +42,56 @@ const s = reactive<{
   customAf: "",
 });
 
-// 进入页面时用全局源文件作为初始值；换文件时同步
-watch(
-  () => store.inputFile,
-  (v) => { if (v) s.input = v; },
-  { immediate: true },
-);
+// 输出容器复用「设置里的默认容器」（store.fmt），进入页面或改设置时同步
 watch(
   () => store.fmt,
   (v) => { if (v) s.fmt = v; },
   { immediate: true },
 );
 
-const inputName = computed(() => s.input || "input.mp4");
+// 源文件直接复用全局 store.inputFile（工作台 / 其它页选择的文件），无任何本地副本，保证始终同步
+const inputName = computed(() => store.inputFile || "input.mp4");
+
+// 拖放区：Tauri 在 webview 层拦截系统文件拖拽，只能经由 onDragDropEvent 拿真实路径
+const zone = ref<HTMLElement | null>(null);
+const dragOver = ref(false);
+let unlisten: (() => void) | null = null;
+
+function inZone(el: HTMLElement | null, pos: { x: number; y: number }): boolean {
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const x = pos.x / dpr;
+  const y = pos.y / dpr;
+  return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+}
+
+onMounted(async () => {
+  unlisten = await getCurrentWebview().onDragDropEvent((event) => {
+    const p = event.payload;
+    if (p.type === "enter" || p.type === "over") {
+      dragOver.value = inZone(zone.value, p.position);
+    } else if (p.type === "drop") {
+      dragOver.value = false;
+      if (inZone(zone.value, p.position) && p.paths.length) setInputFile(p.paths[0]);
+    } else {
+      dragOver.value = false;
+    }
+  });
+});
+
+onUnmounted(() => {
+  unlisten?.();
+  unlisten = null;
+});
+
+// 秒 → m:ss，用于显示已选文件时长
+function formatDur(d: number): string {
+  if (!d) return "";
+  const m = Math.floor(d / 60);
+  const x = Math.round(d % 60);
+  return `${m}:${String(x).padStart(2, "0")}`;
+}
 
 // 输出文件名预览
 const outputName = computed(() => {
@@ -96,15 +132,28 @@ function pick() {
     <CommandCard title="滤镜调色 · 命令预览" :command="cmd" task-name="滤镜调色" :cwd="inputCwd()" />
 
     <div class="card rounded-2xl p-5 space-y-5">
-      <!-- 源文件 -->
+      <!-- 源文件（直接复用全局 store.inputFile，与工作台 / 其它页共享同一份源） -->
       <div>
-        <label class="text-sm font-semibold mb-2 block">源视频</label>
-        <div class="rounded-xl border border-panel2 bg-ink/40 px-4 py-3 text-sm flex items-center justify-between">
-          <span class="truncate">
-            <template v-if="s.input">{{ inputName }}</template>
-            <template v-else>未选择文件</template>
-          </span>
-          <span class="text-brand text-xs cursor-pointer" @click="pick()">选择</span>
+        <label class="text-sm font-semibold mb-2 block">输入选择（源视频）</label>
+        <div
+          ref="zone"
+          class="rounded-xl border-2 border-dashed px-4 py-6 text-sm flex flex-col items-center justify-center gap-2 cursor-pointer transition-all"
+          :class="dragOver ? 'border-brand bg-brand/10 shadow-glow' : 'border-panel2 bg-ink/40 hover:border-brand hover:bg-brand/5 hover:shadow-glow'"
+          @click="pick()"
+        >
+          <template v-if="store.inputFile">
+            <div class="font-medium truncate max-w-full">{{ store.inputFile.split(/[\\/]/).pop() }}</div>
+            <div v-if="store.inputInfo" class="text-[11px] text-muted">
+              <template v-if="store.inputInfo.videoWidth"> {{ store.inputInfo.videoWidth }}×{{ store.inputInfo.videoHeight }} · </template>
+              <template v-if="store.inputInfo.duration">时长 {{ formatDur(store.inputInfo.duration) }}</template>
+              <template v-if="store.inputInfo.size"> · {{ (store.inputInfo.size / 1048576).toFixed(1) }} MB</template>
+            </div>
+            <span class="text-brand text-xs">重新选择 / 拖拽替换</span>
+          </template>
+          <template v-else>
+            <div class="font-medium">点击或拖拽选择视频文件</div>
+            <div class="text-[11px] text-muted">复用工作台已选择的文件，或直接拖入</div>
+          </template>
         </div>
       </div>
 
