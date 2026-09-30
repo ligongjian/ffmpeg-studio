@@ -1,0 +1,106 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== 主题变量：默认亮色（紫），html.dark 覆盖为深色 ===== */
+:root {
+  --bg: 246 244 254; /* 页面底色 淡紫 */
+  --panel: 255 255 255; /* 卡片/侧栏 */
+  --line: 224 218 242; /* 边框 */
+  --text: 30 27 51; /* 正文 深紫黑 */
+  --muted: 107 101 132; /* 次要文字 */
+  --brand: 124 58 237; /* 紫 violet-600 */
+  --brand-h: 109 40 217;
+  --on-brand: 255 255 255;
+}
+html.dark {
+  --bg: 15 23 42;
+  --panel: 30 41 59;
+  --line: 51 65 85;
+  --text: 248 250 252;
+  --muted: 148 163 184;
+  --brand: 139 92 246;
+  --brand-h: 124 58 237;
+  --on-brand: 255 255 255;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+body {
+  margin: 0;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--line));
+  border-radius: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.nav-active {
+  background: linear-gradient(90deg, rgb(var(--brand) / 0.14), rgb(var(--brand) / 0));
+  color: rgb(var(--text));
+}
+.nav-active .nav-ico {
+  color: rgb(var(--brand));
+}
+.seg-btn.active,
+.chip.active,
+.filter-chip.active {
+  background: rgb(var(--brand));
+  color: var(--on-brand);
+  font-weight: 600;
+  border-color: rgb(var(--brand));
+}
+
+.card {
+  background: rgb(var(--panel));
+  border: 1px solid rgb(var(--line));
+  box-shadow: 0 1px 3px rgb(var(--text) / 0.06);
+}
+.cmd {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+.drop-ring {
+  outline: 2px dashed rgb(var(--brand));
+  outline-offset: 4px;
+}
+.slider {
+  accent-color: rgb(var(--brand));
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid rgb(var(--brand));
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 60;
+}
+.skip-link:focus {
+  left: 1rem;
+  top: 1rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

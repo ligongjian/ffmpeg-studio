@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="uPqybT1UPInV5aUQAM68EV">
+<head data-page-node-id="zeV4kTVBxFaYfTL7knHoAh">
+<meta charset="UTF-8" data-page-node-id="lDKyGcwvqAYuPISmyS0bNb" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="e7mSd6DzYvw6iQtOr37yIg" />
+<title>FFmpeg Studio — 可视化音视频处理工作台</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" data-page-node-id="h1AE47lDRWkgrO7JaijDDy">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" data-page-node-id="O3zjn5YgGfWqW80rBbj572">
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: {
+      extend: {
+        fontFamily: {
+          sans: ['Plus Jakarta Sans', 'sans-serif'],
+          mono: ['JetBrains Mono', 'monospace'],
+        },
+        colors: {
+          ink:    'rgb(var(--bg) / <alpha-value>)',
+          panel:  'rgb(var(--panel) / <alpha-value>)',
+          panel2: 'rgb(var(--line) / <alpha-value>)',
+          brand:  'rgb(var(--brand) / <alpha-value>)',
+          brandd: 'rgb(var(--brand-h) / <alpha-value>)',
+          chalk:  'rgb(var(--text) / <alpha-value>)',
+          muted:  'rgb(var(--muted) / <alpha-value>)',
+        },
+        boxShadow: {
+          glow: '0 0 0 1px rgb(var(--brand) / 0.25), 0 8px 30px -8px rgb(var(--brand) / 0.35)',
+        }
+      }
+    }
+  }
+</script>
+<style>
+  /* ---- 主题变量：默认亮色（紫），html.dark 覆盖为深色 ---- */
+  :root{
+    --bg: 246 244 254;        /* 页面底色 淡紫 */
+    --panel: 255 255 255;     /* 卡片/侧栏 */
+    --line: 224 218 242;      /* 边框 */
+    --text: 30 27 51;         /* 正文 深紫黑 */
+    --muted: 107 101 132;     /* 次要文字 */
+    --brand: 124 58 237;      /* 紫 violet-600 */
+    --brand-h: 109 40 217;
+    --on-brand: 255 255 255;
+  }
+  html.dark{
+    --bg: 15 23 42;
+    --panel: 30 41 59;
+    --line: 51 65 85;
+    --text: 248 250 252;
+    --muted: 148 163 184;
+    --brand: 139 92 246;
+    --brand-h: 124 58 237;
+    --on-brand: 255 255 255;
+  }
+  html,body{height:100%}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:rgb(var(--line));border-radius:8px}
+  ::-webkit-scrollbar-track{background:transparent}
+  .nav-active{background:linear-gradient(90deg,rgb(var(--brand)/.14),rgb(var(--brand)/0));color:rgb(var(--text))}
+  .nav-active .nav-ico{color:rgb(var(--brand))}
+  .seg-btn.active{background:rgb(var(--brand));color:var(--on-brand);font-weight:600;border-color:rgb(var(--brand))}
+  .chip.active{background:rgb(var(--brand));color:var(--on-brand);border-color:rgb(var(--brand))}
+  .tab-pane{display:none}
+  .tab-pane.active{display:block;animation:fade .25s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .slider{accent-color:rgb(var(--brand))}
+  .card{background:rgb(var(--panel));border:1px solid rgb(var(--line));box-shadow:0 1px 3px rgb(var(--text)/.06)}
+  .cmd{font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.7}
+  .drop-ring{outline:2px dashed rgb(var(--brand));outline-offset:4px}
+  @media (prefers-reduced-motion: reduce){.tab-pane{animation:none}}
+  /* 键盘焦点环：覆盖组件自身的 outline-none */
+  a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,[tabindex]:focus-visible{outline:2px solid rgb(var(--brand));outline-offset:2px;border-radius:6px}
+  .skip-link{position:absolute;left:-9999px;top:0;z-index:60}
+  .skip-link:focus{left:1rem;top:1rem}
+</style>
+</head>
+<body class="bg-ink text-chalk font-sans antialiased" data-page-node-id="SKMfS8bHnof6XKGe5dzVLL">
+<a href="#content" class="skip-link bg-brand text-white px-4 py-2 rounded-lg text-sm font-bold shadow-glow">跳到主内容</a>
+<div class="flex h-screen overflow-hidden" data-page-node-id="NflsThV6gGtArXs6mUR8Vp">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside id="sidebar" class="w-64 shrink-0 bg-panel border-r border-panel2 flex flex-col fixed lg:static inset-y-0 left-0 z-30 -translate-x-full lg:translate-x-0 transition-transform" data-page-node-id="DvD8gCdtIlR8wCKFQ1EMaa">
+    <div class="h-16 flex items-center gap-3 px-5 border-b border-panel2" data-page-node-id="wvRS0cAnHHYvVAIiv9oSTg">
+      <div class="w-9 h-9 rounded-xl bg-brand/15 flex items-center justify-center" data-page-node-id="sn0Ke7vd3VTHt6qbLBs95D">
+        <svg class="w-5 h-5 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="XgGCJJCuwcbmA2gxFnkktQ"><path d="M5 3l14 9-14 9V3z" stroke-linecap="round" stroke-linejoin="round" data-page-node-id="IfkGhoDg0WVnv5pxNOkR4F"/></svg>
+      </div>
+      <div data-page-node-id="Og2bIkyx0RNPW9pSpCArOO">
+        <div class="font-extrabold leading-tight" data-page-node-id="9seh1Hs9NGnOJcn7ox0yX3">FFmpeg Studio</div>
+        <div class="text-[11px] text-muted" data-page-node-id="EhoSbmor5XsHJGaSXNByIe">可视化处理工作台</div>
+      </div>
+    </div>
+
+    <nav class="flex-1 overflow-y-auto py-3 px-3 space-y-1 text-sm" id="nav" data-page-node-id="iXy0D7hNCKMNGDOgyTDqoo">
+      <a class="nav-item nav-active flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors hover:bg-panel2/50" data-tab="dashboard" data-page-node-id="NXqh5V193lE56Nf8NvnV0J"><span class="nav-ico text-muted" data-page-node-id="q4HBJkKBuyX9WDeHKUd1cj"><svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="idJfwcCAPbaJOSqfiHzbVP"><rect x="3" y="3" width="7" height="7" rx="1" data-page-node-id="6fMT37rO10WHmHSrvBrFNq"/><rect x="14" y="3" width="7" height="7" rx="1" data-page-node-id="IHUhCnw5O4fOlgX41ak70E"/><rect x="3" y="14" width="7" height="7" rx="1" data-page-node-id="JxPqTWMeBfD91XNRyvFqQE"/><rect x="14" y="14" width="7" height="7" rx="1" data-page-node-id="L8iOfNq48yojQutk8Gd3O8"/></svg></span>工作台</a>
+      <a class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors hover:bg-panel2/50" data-tab="convert" data-page-node-id="NpnGaH5stuRxpMCdQhEPLB"><span class="nav-ico text-muted" data-page-node-id="3wvTNW5pSB5UGf2i4cqu5z"><svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="rH0C4HkzknByKuKJK1AJwD"><path d="M4 7h11l-3-3M20 17H9l3 3" stroke-linecap="round" stroke-linejoin="round" data-page-node-id="xbjCkSNZmUm7EmvFA413Rl"/></svg></span>格式转换</a>
+      <a class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors hover:bg-panel2/50" data-tab="compress" data-page-node-id="kQh5yujrgCB0Uuump4FSY3"><span class="nav-ico text-muted" data-page-node-id="1NDVA5zPDLmdVEi2S6Rnge"><svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="G6Yb61eD21LiNNLsE2a9x1"><path d="M3 8h6l-2-2M21 16h-6l2 2" stroke-linecap="round" stroke-linejoin="round" data-page-node-id="D3jmIv2hw0BfrqBMeqXzVL"/><path d="M9 8v8M15 8v8" data-page-node-id="SENw9nF9AGjMEFIjIQe4ee"/></svg></span>压缩优化</a>
+      <a class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors hover:bg-panel2/50" data-tab="cut" data-page-node-id="C2FTFs8xFYFVNTd79BAHGc"><span class="nav-ico text-muted" data-page-node-id="3ShLWBhJrtuCcPBZ1Cnyxm"><svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="l14zKrBjx9y9yQK2Mh5G0T"><circle cx="6" cy="6" r="3" data-page-node-id="NAJq6eTYG1VcwdTB96R0HC"/><circle cx="6" cy="18" r="3" data-page-node-id="3huHIG2nVDgjWFRCfKrQx1"/><path d="M20 4L8.5 15.5M14.5 14.5L20 20M8.5 8.5L12 12" stroke-linecap="round" data-page-node-id="wLxDwPDkRxBvWHXo3Onvmv"/></svg></span>剪辑分割</a>
+      <a class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors hover:bg-panel2/50" data-tab="merge" data-page-node-id="ZSFFg0uU2K6wlA3uuFNuDt"><span class="nav-ico text-muted" data-page-node-id="NSV5OgEJtmmfJxuS4H4dbT"><svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="9qEvDioSLosvXCFpBJP5Jf"><path d="M8 4v16M16 4v16M8 12h8" stroke-linecap="round" data-page-node-id="CGFKFuMWX4p0ftnIuDOTOP"/></svg></span>拼接合并</a>
+      <a class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors hover:bg-panel2/50" data-tab="extract" data-page-node-id="qKQNHxZMtDDZzG6EH8fh91"><span class="nav-ico text-muted" data-page-node-id="3f3W6f5F9rr8UM5EqFlGyn"><svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="YmEgb5lI1tZG4vN8y1dKS8"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" stroke-linecap="round" stroke-linejoin="round" data-page-node-id="NtagwpVG2BUkHCn3LtYziA"/></svg></span>提取分离</a>
+      <a class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors hover:bg-panel2/50" data-tab="watermark" data-page-node-id="o3r12DXunhUSz5p04GMX4j"><span class="nav-ico text-muted" data-page-node-id="qh92yl3esruh7GcgAn7Bgo"><svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="unZl4h3CFzOR3j18jr7giY"><rect x="3" y="3" width="18" height="18" rx="2" data-page-node-id="vXxDsqWUqNIhvhgEwgbQRB"/><path d="M3 15l5-5 4 4 3-3 6 6" stroke-linecap="round" stroke-linejoin="round" data-page-node-id="2XH1EblpBXlCEyEXtjZOEu"/></svg></span>水印字幕</a>
+      <a class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors hover:bg-panel2/50" data-tab="filters" data-page-node-id="577B3eYEFz5bCEkkHiPybC"><span class="nav-ico text-muted" data-page-node-id="RbnAVhPx6WDvUghPP2FwW4"><svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="Hx0DDARr9KSHAFzWKBtEK6"><path d="M3 4h18l-7 8v6l-4 2v-8L3 4z" stroke-linecap="round" stroke-linejoin="round" data-page-node-id="XXbPKNEawc3jSn4WyRURUo"/></svg></span>滤镜调色</a>
+      <a class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors hover:bg-panel2/50" data-tab="record" data-page-node-id="5rruyQGMDehSdSsGEJZVaA"><span class="nav-ico text-muted" data-page-node-id="Oh0t7dZ1vnf65TVrssuDbL"><svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="8pcupqCo5vCC5WBx1tX7qI"><circle cx="12" cy="12" r="9" data-page-node-id="5k0DSgUZ8LzfR5PCzYq5YG"/><circle cx="12" cy="12" r="3" fill="currentColor" data-page-node-id="1DHFySAxcCzECoTqZqwUbM"/></svg></span>录制采集</a>
+      <a class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors hover:bg-panel2/50" data-tab="stream" data-page-node-id="n8RVFC3Vjm4WnCU0gkpeCr"><span class="nav-ico text-muted" data-page-node-id="GDRbXCLy1P4JX5zRlvRVwQ"><svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="JCD3P2Ik8tMDwpYymIt4qV"><path d="M3 7l4 4-4 4M11 16h7M11 12h7M11 8h7" stroke-linecap="round" stroke-linejoin="round" data-page-node-id="CdoJmNqLaFuCpIMkh4p8EC"/></svg></span>流媒体</a>
+      <a class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors hover:bg-panel2/50" data-tab="batch" data-page-node-id="qahlgWEc37y47cSUAfhiW6"><span class="nav-ico text-muted" data-page-node-id="avSOCcitJqRsB7pA3VRh7N"><svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="cFwKHYXVbzYM3lLOnd4mXb"><rect x="3" y="4" width="18" height="4" rx="1" data-page-node-id="8pE7GMP9Tw6ZLh5VhnPX3S"/><rect x="3" y="10" width="18" height="4" rx="1" data-page-node-id="vNdORKF100MJX1LzW12a3g"/><rect x="3" y="16" width="18" height="4" rx="1" data-page-node-id="m8QjonmSvU5XpwUJdBMrIa"/></svg></span>批量处理</a>
+      <a class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors hover:bg-panel2/50" data-tab="tasks" data-page-node-id="QnavTasks"><span class="nav-ico text-muted" data-page-node-id="QnavTasksIco"><svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="QnavTasksSvg"><path d="M4 6h16M4 12h16M4 18h10" stroke-linecap="round" data-page-node-id="QnavTasksP"/></svg></span>任务队列</a>
+    </nav>
+
+    <div class="p-3 border-t border-panel2 flex items-center gap-3" data-page-node-id="SideBottom">
+      <button onclick="goto('settings')" title="设置" aria-label="设置" class="w-8 h-8 shrink-0 rounded-lg flex items-center justify-center text-muted hover:text-chalk hover:bg-panel2/50 transition-colors cursor-pointer" data-page-node-id="SideSettingsBtn"><svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="vPeAcJMYJThbdKXeat5zfu"><circle cx="12" cy="12" r="3" data-page-node-id="k7txIlpqeBpqjZgt1cRBGz"/><path d="M19 12a7 7 0 00-.1-1l2-1.5-2-3.5-2.4 1a7 7 0 00-1.7-1L14.5 3h-5l-.3 2.5a7 7 0 00-1.7 1l-2.4-1-2 3.5L3 11a7 7 0 000 2l-2 1.5 2 3.5 2.4-1a7 7 0 001.7 1l.3 2.5h5l.3-2.5a7 7 0 001.7-1l2.4 1 2-3.5L21 13a7 7 0 00.1-1z" stroke-linecap="round" stroke-linejoin="round" data-page-node-id="SMTp2eNr5mfJ5uuXmp2GLT"/></svg></button>
+      <div class="flex items-center gap-2 text-xs text-muted cursor-pointer hover:text-chalk transition-colors min-w-0 truncate" onclick="goto('settings')" data-page-node-id="EngStatusInner">
+        <span class="w-2 h-2 rounded-full bg-brand shrink-0" data-page-node-id="EngStatusDot"></span>
+        <span data-page-node-id="EngStatusTxt">FFmpeg 6.1.1 · 已就绪</span>
+      </div>
+    </div>
+  </aside>
+  <div id="sideBackdrop" class="fixed inset-0 z-20 bg-black/50 hidden lg:hidden" onclick="toggleSidebar()" data-page-node-id="sideBackdrop"></div>
+
+  <!-- ============ MAIN ============ -->
+  <main class="flex-1 flex flex-col min-w-0" data-page-node-id="kZVLbWnFBlgNgWEDEgSF2v">
+    <!-- Topbar -->
+    <header class="h-16 shrink-0 flex items-center justify-between px-6 border-b border-panel2 bg-panel/60 backdrop-blur" data-page-node-id="Bpqjj1wHjFylvYV4EjIDZh">
+      <div class="flex items-center gap-3" data-page-node-id="FD5YGh9mf2jIrqnZSOFZxb">
+        <button onclick="toggleSidebar()" class="lg:hidden w-9 h-9 rounded-lg border border-panel2 flex items-center justify-center hover:border-brand transition-colors cursor-pointer" title="菜单" data-page-node-id="menuBtn">
+          <svg class="w-[18px] h-[18px] text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16" stroke-linecap="round"/></svg>
+        </button>
+        <h1 id="pageTitle" class="font-bold text-lg leading-tight" data-page-node-id="fiCRgRfsEpAj1QQJ5Z1Iqw">工作台</h1>
+        <p id="pageSub" class="text-xs text-muted" data-page-node-id="AtzxGXN7Yumots37DoLhjV">总览与快速开始</p>
+      </div>
+      <div class="flex items-center gap-2" data-page-node-id="GDsS2K1HZdoEnwem0xoIMo">
+        <button onclick="toggleTheme()" class="w-9 h-9 rounded-lg border border-panel2 flex items-center justify-center hover:border-brand transition-colors cursor-pointer" title="切换主题" data-page-node-id="gWvLv6LrwzzQuFGolbYGDG">
+          <svg class="w-[18px] h-[18px] text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="kIFMZHiczzA9IIpVFrwBjr"><path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z" stroke-linecap="round" stroke-linejoin="round" data-page-node-id="cDGAwjCgybCvnAfJ9E4YuG"/></svg>
+        </button>
+        <button onclick="goto('tasks')" class="relative w-9 h-9 rounded-lg border border-panel2 flex items-center justify-center hover:border-brand transition-colors cursor-pointer" title="任务队列" data-page-node-id="UKUwFqruMIHPoDxUeqjnW7">
+          <svg class="w-[18px] h-[18px] text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="FkNX7FzkeAKf9ZCYNCmwdA"><path d="M4 6h16M4 12h16M4 18h10" stroke-linecap="round" data-page-node-id="t8mubePGylbmABjXGj5QW9"/></svg>
+          <span id="taskBadge" class="hidden absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-brand text-white text-[10px] font-bold flex items-center justify-center" data-page-node-id="m8S7bZZtsTWgc1MnSS3v9b">0</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Content -->
+    <div class="flex-1 overflow-y-auto p-6" id="content" data-page-node-id="XjWs4ZEmCHPsetBTdEyGoI">
+
+      <!-- ===== DASHBOARD ===== -->
+      <section class="tab-pane active" data-pane="dashboard" data-page-node-id="eqktaBNl0HwiCKplrxe9JN">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6" data-page-node-id="LLYfj4cVOfbFytXRhazd1l">
+          <div class="card rounded-2xl p-4" data-page-node-id="FR6aDiU7bzhydRsEsOEAJg"><div class="text-xs text-muted" data-page-node-id="nB8Btw6fnWqOPHfaqfmalx">今日任务</div><div class="text-2xl font-extrabold mt-1" data-page-node-id="1CLbYV7wciimRA0CAz0mjb">24</div><div class="text-xs text-brand mt-1" data-page-node-id="EPrHXQFLviuu5tAyZThJD8">↑ 较昨日 +12%</div></div>
+          <div class="card rounded-2xl p-4" data-page-node-id="lY6GTJPRCFw5dxSczfrboF"><div class="text-xs text-muted" data-page-node-id="fDj7bnpEAAxPA5jDvN19YE">处理时长</div><div class="text-2xl font-extrabold mt-1" data-page-node-id="fsanCI01MyzC9M2uKVcv6J">3.2<span class="text-base font-semibold" data-page-node-id="23CRGdrs0MbedtByDKWHAv">h</span></div><div class="text-xs text-muted mt-1" data-page-node-id="C4L6vGDJsgEKYScQocBL0C">平均 8 分/任务</div></div>
+          <div class="card rounded-2xl p-4" data-page-node-id="9T4hYBQF0jYj7fKn5QQDP8"><div class="text-xs text-muted" data-page-node-id="GPnY8gqRb0H2ltQBDbYeJQ">节省空间</div><div class="text-2xl font-extrabold mt-1" data-page-node-id="37BDqFADxjSyA9tEBa0ga3">8.4<span class="text-base font-semibold" data-page-node-id="TrU8ex4YA6DOcem06bBC6R">GB</span></div><div class="text-xs text-brand mt-1" data-page-node-id="q8j22u33EDfdQN0b1SIuv6">压缩率 61%</div></div>
+          <div class="card rounded-2xl p-4" data-page-node-id="QUlkoLUNlzHjyUvy4l1DMH"><div class="text-xs text-muted" data-page-node-id="Xt94QENwwbzAKBtPo3v69E">队列中</div><div class="text-2xl font-extrabold mt-1" id="dashQueue" data-page-node-id="tKcC0tOdkILDCH8OUFp4Mj">0</div><div class="text-xs text-muted mt-1" data-page-node-id="EB1ccKCOuAtKfgwH9h8Q3o">点左侧「任务队列」或右上铃铛查看</div></div>
+        </div>
+
+        <div class="grid lg:grid-cols-3 gap-6" data-page-node-id="JqyjjxHeRcPZIHbyjhVqhk">
+          <div class="lg:col-span-2 card rounded-2xl p-5" data-page-node-id="7V0C05uZEI9V5STryMBbFS">
+            <div class="flex items-center justify-between mb-4" data-page-node-id="yFsywrL78AfllTRa5n9wao">
+              <h3 class="font-bold" data-page-node-id="6zSNWVQznjV9KfgjwSj7QR">快速开始</h3>
+              <span class="text-xs text-muted" data-page-node-id="kwp7DZrYWxQooGyCgFryc9">拖入文件或选择功能</span>
+            </div>
+            <div id="dropHero" class="rounded-xl border-2 border-dashed border-panel2 bg-ink/40 p-8 text-center cursor-pointer hover:border-brand transition-colors" onclick="simulateDrop()" data-page-node-id="CkalCiETWEsKqY9GS1lfsE">
+              <svg class="w-10 h-10 mx-auto text-muted mb-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" data-page-node-id="C5rrrHnBBvEOC3hGyEf9q7"><path d="M12 16V4m0 0L8 8m4-4l4 4M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke-linecap="round" stroke-linejoin="round" data-page-node-id="wzP8f0X3tKZcZr2vdMiKVF"/></svg>
+              <div class="font-semibold" data-page-node-id="qMfBMEVfM5Ct8gSX6Jdeoe">拖放媒体文件到这里</div>
+              <div class="text-xs text-muted mt-1" data-page-node-id="DLM2eUfCu9lYln6FBAZPdB">支持 mp4 / mkv / mov / mp3 / wav / png 等</div>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4" id="quickActions" data-page-node-id="7ynyJprgAWurHNUjvVDQH2"></div>
+          </div>
+          <div class="card rounded-2xl p-5" data-page-node-id="S9yVEAOR5EvEEHbZscxKDn">
+            <h3 class="font-bold mb-4" data-page-node-id="MnHwU11fUWjUU9VYZYY9jk">最近文件</h3>
+            <div class="space-y-3 text-sm" id="recentList" data-page-node-id="aeBGCqUIo3wEgUuCSaWBzR"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== CONVERT ===== -->
+      <section class="tab-pane" data-pane="convert" data-page-node-id="KRm3RjD1G7roqKYf15TYuo"><div class="space-y-6" data-page-node-id="seEH2KRB755cPmZkZ1DVam">
+        <div id="convCmd" data-page-node-id="MvLSPNf8iayFB9n590DYog"></div>
+        <div class="space-y-5" data-page-node-id="xWjZsCwUy1wmxnvhvzRDWw">
+          <div class="card rounded-2xl p-5" data-page-node-id="HibRibh4jJhfYGuLebpZtk">
+            <label class="text-sm font-semibold mb-2 block" data-page-node-id="K09VCEkqzizThuA44Vh0Qi">源文件</label>
+            <div class="rounded-xl border border-panel2 bg-ink/40 px-4 py-3 text-sm flex items-center justify-between" data-page-node-id="vZsIholuPYnmxYw64UMFO9">
+              <span class="truncate" data-page-node-id="S734QjranGpU7smhMBmyPS">demo_record.mov</span>
+              <span class="text-brand text-xs cursor-pointer" data-page-node-id="vZLshouq3pMit67uzUBIgt">更换</span>
+            </div>
+            <div class="grid md:grid-cols-2 gap-4 mt-4" data-page-node-id="7GIdmWQLbGFZB4kfrVObTc">
+              <div data-page-node-id="2CAeLvErOz6Icd6U9mlaHJ"><label class="text-xs text-muted" data-page-node-id="ejcB8XsL07GX1QydrNezeN">目标格式</label>
+                <select id="convFmt" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" data-page-node-id="6x4cPPu6XOgobJOP3W5PxM">
+                  <option value="mp4" data-page-node-id="jYYrBYUeZCR9E8U2mgPIB6">MP4 (H.264)</option><option value="mkv" data-page-node-id="yB2XsDKom0ixynETIPSk50">MKV</option><option value="webm" data-page-node-id="GvAFdp8N9auZ3CHBqGlzge">WebM (VP9)</option><option value="mov" data-page-node-id="8kxYBGOMq3nfaht0DRCFAU">MOV</option><option value="avi" data-page-node-id="bKqkV2BhdKLBHd1KSAbtC2">AVI</option><option value="gif" data-page-node-id="nzzSXE0ZVgKDl4Hgbl44y4">GIF</option><option value="mp3" data-page-node-id="pgbNhMYb6GUPtGP4BzHINV">MP3 (仅音频)</option>
+                </select></div>
+              <div data-page-node-id="yd1PsjjSfEuOVRaSRjrDim"><label class="text-xs text-muted" data-page-node-id="MjAasmMSdFRWfIsq8JqVG4">编码方式</label>
+                <select id="convEnc" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" data-page-node-id="8IldTIy52eRblWlsGmdXFS">
+                  <option value="libx264" data-page-node-id="cZkU4gr6rVPUKGhThkmfei">H.264 (libx264)</option><option value="libx265" data-page-node-id="D1B242gbFHIKA87d2HIFvr">H.265 / HEVC</option><option value="vp9" data-page-node-id="AypEIM0REajMgYAA0mA7ts">VP9</option><option value="copy" data-page-node-id="ukYAqHHeRib7Gll0OEzfNi">直接拷贝 (不重编码)</option>
+                </select></div>
+              <div data-page-node-id="UAuy2Gha8YFxI78FhLifzY"><label class="text-xs text-muted" data-page-node-id="kdMycJ20xFnOxKbFAR44VS">分辨率</label>
+                <select id="convRes" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" data-page-node-id="Zg7DHYICMgvOnga96uMVdy">
+                  <option value="" data-page-node-id="NjABhSvx10mGyasj2M5e0B">保持原始</option><option value="3840:2160" data-page-node-id="NluymjR4JqyXeBIr7YRINQ">4K (3840×2160)</option><option value="1920:1080" data-page-node-id="AUR3GAgmwyt3GmJ1Lr6A9E">1080p</option><option value="1280:720" data-page-node-id="GtLJApBsmyHdkYvSWzwQSi">720p</option><option value="854:480" data-page-node-id="KphUTbIqP5P3Vci48WUdAB">480p</option>
+                </select></div>
+              <div data-page-node-id="31jEtA7I4Z2BnBhEngrQWv"><label class="text-xs text-muted" data-page-node-id="rI0GSIHsRGd6K1RPmCPvb1">音频编码</label>
+                <select id="convAud" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" data-page-node-id="f5YRN3JJV8kyM35cZ0o1cr">
+                  <option value="aac" data-page-node-id="v1pmQXqJzobwCXqP58pO3I">AAC</option><option value="mp3" data-page-node-id="w8OH3x57nnJ6KxRwlgyVrH">MP3</option><option value="opus" data-page-node-id="X6dQZmYvr2XixT5CdUHLrA">Opus</option><option value="copy" data-page-node-id="xauD8myLwAGDrFBOYLmvv3">拷贝</option>
+                </select></div>
+            </div>
+            <div class="flex items-center gap-2 mt-5" data-page-node-id="iG0xUrFVHHjBoMRhb38k4N">
+              <span class="text-xs text-muted" data-page-node-id="GpxcFbB77B6IT6CcS8ZNPQ">质量</span>
+              <div class="flex gap-1" id="convQuality" data-page-node-id="Ot7EopYrXVj2fhXp22nQ1S">
+                <button class="seg-btn px-3 py-1 rounded-md border border-panel2 text-xs" data-q="28" data-page-node-id="4vbK91qRcTHFiksaYtnh2Q">省空间</button>
+                <button class="seg-btn active px-3 py-1 rounded-md border border-panel2 text-xs" data-q="23" data-page-node-id="Bj2Wwr5YQiwmAMn9qPd8wu">均衡</button>
+                <button class="seg-btn px-3 py-1 rounded-md border border-panel2 text-xs" data-q="18" data-page-node-id="vNpzvdgdMLm1oTgpMvKj6I">高画质</button>
+              </div>
+            </div>
+          </div>
+          <div class="card rounded-2xl p-5" data-page-node-id="nO81NMy5SEkViwIUiGrDGM">
+            <h3 class="font-semibold mb-3" data-page-node-id="FSWMh0C0S2Ki0pvKHHEQP5">高级选项</h3>
+            <div class="grid md:grid-cols-3 gap-4 text-sm" data-page-node-id="0ibaNT9qfXNGoaxOgL0cFv">
+              <label class="flex items-center gap-2 cursor-pointer" data-page-node-id="VcVFKhG2ANue9jBZHYKGjw"><input type="checkbox" id="convFaststart" class="accent-brand" checked data-page-node-id="MuG9AoXJbJUVfDJlySRtNz"> Web 快速启动</label>
+              <label class="flex items-center gap-2 cursor-pointer" data-page-node-id="4HFsGOQpLJ97fReWcOF0DG"><input type="checkbox" id="convDeint" class="accent-brand" data-page-node-id="3v9rYR1ftu0jFWom6iN65a"> 去隔行</label>
+              <label class="flex items-center gap-2 cursor-pointer" data-page-node-id="8eVt5r4yz8zfbnt55P5bRp"><input type="checkbox" id="convNorm" class="accent-brand" data-page-node-id="tbRt8PegoezZ7hUgVtoFZJ"> 音频响度归一</label>
+            </div>
+          </div>
+        </div>
+      </div></section>
+
+      <!-- ===== COMPRESS ===== -->
+      <section class="tab-pane" data-pane="compress" data-page-node-id="SUCmJReAzHnQjVhGzGzW6e"><div class="space-y-6" data-page-node-id="kHh9pFD8PVNFvMirzskW16">
+        <div id="cmpCmd" data-page-node-id="BlKxvP5cuZ8ND1vzf8oJYs"></div>
+        <div class="card rounded-2xl p-5 space-y-6" data-page-node-id="1xmCSnjXIvRpPMWM4BZ4DU">
+          <div data-page-node-id="IZaJUCPaiwK63G3HcZweKY">
+            <div class="flex justify-between text-sm mb-1" data-page-node-id="hWi5PovhhEuUk3qm1Oe3rB"><span class="font-semibold" data-page-node-id="pCPNiIOemW5tdVbMHxk83m">CRF 恒定质量</span><span id="crfVal" class="text-brand font-bold" data-page-node-id="8wZykKj5wXtE6PODANjomc">23</span></div>
+            <input type="range" id="crf" min="18" max="35" value="23" class="slider w-full" data-page-node-id="sW42Opidcn2Vl51jJ1hu6l">
+            <div class="flex justify-between text-xs text-muted" data-page-node-id="gixcqtjaThASkVosHorCbl"><span data-page-node-id="RF0UtCvhCaUmsgQDJtfEJ7">18 高画质</span><span data-page-node-id="8O5qM0JGCYwahqQmisNJ5n">35 高压缩</span></div>
+          </div>
+          <div data-page-node-id="ldjS7n8CHwW5DuxwnaD55J">
+            <div class="text-sm font-semibold mb-2" data-page-node-id="vTpVgDh7QpOa1N0xtK7iQI">编码预设 (速度 / 压缩率)</div>
+            <div class="flex flex-wrap gap-1.5" id="presetGroup" data-page-node-id="1NgoDxWVhGnA4l9TtJuRdT">
+              <button class="seg-btn px-3 py-1.5 rounded-md border border-panel2 text-xs" data-p="ultrafast" data-page-node-id="uMFeJTljoCXPDcY6ehluC9">ultrafast</button>
+              <button class="seg-btn px-3 py-1.5 rounded-md border border-panel2 text-xs" data-p="fast" data-page-node-id="EPd3oyyvPksdFZ0nNxs0FB">fast</button>
+              <button class="seg-btn active px-3 py-1.5 rounded-md border border-panel2 text-xs" data-p="medium" data-page-node-id="BnyQP3mnve1CNAppZwnIFH">medium</button>
+              <button class="seg-btn px-3 py-1.5 rounded-md border border-panel2 text-xs" data-p="slow" data-page-node-id="5sKBzycYZZvfS5r8NhYQse">slow</button>
+              <button class="seg-btn px-3 py-1.5 rounded-md border border-panel2 text-xs" data-p="veryslow" data-page-node-id="lChH7MA0TvQgKvOIlZAc0L">veryslow</button>
+            </div>
+          </div>
+          <div class="grid md:grid-cols-2 gap-4" data-page-node-id="w5KU49esKIqw4tBg1FYaVf">
+            <div data-page-node-id="UFh2e0RhdtQbVcPHALXQlT"><label class="text-xs text-muted" data-page-node-id="EHgVHbwew2nv7Af8EXNDk2">最大分辨率</label>
+              <select id="cmpRes" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" data-page-node-id="eB8pC1vm5sC16RT9aFu41c">
+                <option value="" data-page-node-id="X8QxrjcwZbF0rRcXzlNMA9">保持原始</option><option value="1920:1080" data-page-node-id="pHiBdSnzdWomo1lFvinvtd">1080p</option><option value="1280:720" data-page-node-id="zAwv7i4hZbpyMmBu30M7B1">720p</option><option value="854:480" data-page-node-id="ig4QdmP6Rp0gjbKu79E89G">480p</option></select></div>
+            <div data-page-node-id="drjcFf8zv5Pzr0OmEp40PO"><label class="text-xs text-muted" data-page-node-id="1WiZXFC9TBouD66AXHBpeH">目标码率 (可选)</label>
+              <input id="cmpBitrate" placeholder="如 2M，留空按 CRF" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" data-page-node-id="a02wG99ynFCfSSd4TBZpFw"></div>
+          </div>
+          <div class="rounded-xl bg-ink/50 p-4 flex items-center justify-between text-sm" data-page-node-id="Z7VUCthYNuq3GI59B5KdZ3">
+            <div data-page-node-id="NUat6dEQ2NmNN34JShDoU5"><div class="text-muted text-xs" data-page-node-id="rtMaOFNMDVKQ6WK520hPmS">预估输出</div><div class="font-bold mt-0.5" data-page-node-id="2jtydHiV6iE8mtnHdZBo79">约 42 MB <span class="text-muted font-normal" data-page-node-id="gcII5Jpqt5ZVz23hc4bNDo">↓ 节省 63%</span></div></div>
+            <div class="text-right" data-page-node-id="mVhSeKwLAuZmN8jQDygXIn"><div class="text-muted text-xs" data-page-node-id="XGKTnchstrDvK1ENRjuOv6">编码时间</div><div class="font-bold mt-0.5" data-page-node-id="tEPy0hyONEug8wLqsiKrAM">约 3 分 20 秒</div></div>
+          </div>
+        </div>
+      </div></section>
+
+      <!-- ===== CUT ===== -->
+      <section class="tab-pane" data-pane="cut" data-page-node-id="mtkHEgDt50R7V9y4zjCqKF"><div class="space-y-6" data-page-node-id="yVEtshLDplr94LALUe4Us9">
+        <div id="cutCmd" data-page-node-id="P1YPOnfELjzDGIH01lc3CT"></div>
+        <div class="card rounded-2xl p-5" data-page-node-id="BVWcy3BseVnNnUeFTword2">
+          <div class="flex items-center justify-between mb-3" data-page-node-id="IFszqUQnX8bI5zG6Qis8gj">
+            <h3 class="font-semibold" data-page-node-id="1ieScXrwCTJAZ770Sw4pCV">时间轴剪辑</h3>
+            <span class="text-xs text-muted" data-page-node-id="HxBIj5TKR7xq8iavVGtuCn">总时长 00:04:12</span>
+          </div>
+          <div class="relative h-12 rounded-lg bg-ink/60 overflow-hidden cursor-pointer select-none" id="timeline" role="group" aria-label="剪辑时间轴，点击设置入点或出点" data-page-node-id="5OcELO4eAKtqhe1gmE9Hrz">
+            <div class="absolute inset-y-0 bg-brand/25 border-x-2 border-brand" id="tlBand" style="left:10%;right:40%"></div>
+            <div class="absolute top-0 bottom-0 w-0.5 bg-brand" id="tlIn" style="left:10%"></div>
+            <div class="absolute top-0 bottom-0 w-0.5 bg-brand" id="tlOut" style="left:60%"></div>
+          </div>
+          <div class="flex justify-between text-xs text-muted mt-1" data-page-node-id="ssuAZzGk2rCiKdNyGmmlcp"><span data-page-node-id="Rq4LTgVYTG0rdCWu7IpZeA">00:00</span><span data-page-node-id="W03i9llNowpOBwzicI1IUk">01:00</span><span data-page-node-id="EyeWxJKS0FJzULjuKXFkJJ">02:00</span><span data-page-node-id="MuxczIc3ePXvMySSpyXFie">03:00</span><span data-page-node-id="uFw0B8FndjjKRlyYlHMG7Y">04:12</span></div>
+          <p class="text-[11px] text-muted mt-1">提示：点击时间轴先设置入点，再点击设置出点；也可直接编辑下方时间框。</p>
+          <div class="grid md:grid-cols-3 gap-4 mt-5" data-page-node-id="UIYMZ7BWRJm8bzi4XZo5zB">
+            <div data-page-node-id="clELePRPLthMEncNYSrmuw"><label class="text-xs text-muted" data-page-node-id="bZLCY5xnvPxFQnhYSJyhQc">起始 -ss</label><input id="cutStart" value="00:00:25" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" data-page-node-id="GXWJKsDEgyvjDJ18GzQpSF"></div>
+            <div data-page-node-id="pkdTcGNwAXPbSDP9AJsAWl"><label class="text-xs text-muted" data-page-node-id="7yPYwCGiOwbBMiv7MvAbhD">结束 -to</label><input id="cutEnd" value="00:02:30" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" data-page-node-id="R7JFuuJZ2HNprVsD01j7p2"></div>
+            <div data-page-node-id="7ndPpFDC7d95HFBM4t2PDC"><label class="text-xs text-muted" data-page-node-id="nFxFM7T5p2NbetfZyXNv3J">时长 -t</label><input id="cutDur" value="00:02:05" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" data-page-node-id="IgWhYLKjv8jw8XopTwppaX"></div>
+          </div>
+          <div class="flex items-center gap-2 mt-4" data-page-node-id="CCnnk6J2Bwv34Oqzm6S2o3">
+            <span class="text-xs text-muted" data-page-node-id="GfMzAXeZm94D6lHEMWl706">模式</span>
+            <div class="flex gap-1" id="cutMode" data-page-node-id="DftqXn03ESjpIl0RV4BEfa">
+              <button class="seg-btn active px-3 py-1 rounded-md border border-panel2 text-xs" data-m="re" data-page-node-id="QWlkgBz3IwoLnqJSJUgnMU">重编码(精确)</button>
+              <button class="seg-btn px-3 py-1 rounded-md border border-panel2 text-xs" data-m="copy" data-page-node-id="xOgwShjClq5EnIcbpZarl5">关键帧快剪</button>
+            </div>
+          </div>
+        </div>
+      </div></section>
+
+      <!-- ===== MERGE ===== -->
+      <section class="tab-pane" data-pane="merge" data-page-node-id="3xXbCiuIYYqjHr5tT0QH0M"><div class="space-y-6" data-page-node-id="ECiYK7WyzCjQSJhlU8n6wo">
+        <div id="mergeCmd" data-page-node-id="4fKhN0kQsN47BGXmYO9YVb"></div>
+        <div class="card rounded-2xl p-5" data-page-node-id="LwIDCzC7tHBoFXlqGfErs0">
+          <div class="flex items-center justify-between mb-3" data-page-node-id="bByf6cUb36IdJpaJhLQPM4"><h3 class="font-semibold" data-page-node-id="vMBmMHF9YOUNALTm9NLbm2">文件列表</h3><span class="text-xs text-muted" data-page-node-id="WxyekG3DjBIKFSMMR3MJKw">拖拽排序</span></div>
+          <div class="space-y-2" id="mergeList" data-page-node-id="pYhhkzEszGxydxw5CX8Sf2">
+            <div class="flex items-center gap-3 rounded-lg bg-ink/50 px-4 py-3 text-sm" data-page-node-id="TAJaOuFxiJdonbLOeLLbgW"><span class="text-muted cursor-move" data-page-node-id="hgo26VfYNGSGwybyA55bCc">⠿</span><span class="flex-1 truncate" data-page-node-id="AUwJkjqsWIlTPdGTlHvLqM">intro.mp4</span><span class="text-muted text-xs" data-page-node-id="dmRpUjw3YKrn7UaYYnfUAc">00:00:12</span></div>
+            <div class="flex items-center gap-3 rounded-lg bg-ink/50 px-4 py-3 text-sm" data-page-node-id="JWLCibdjHDEu3nxJ4E2qs5"><span class="text-muted cursor-move" data-page-node-id="8Y60J0L7cdhoCb6bDswiXf">⠿</span><span class="flex-1 truncate" data-page-node-id="B5bLtJu5yoVnUfKgC2gTBN">main.mp4</span><span class="text-muted text-xs" data-page-node-id="DsRH60SgDmXDNk4RJR4oI4">00:08:40</span></div>
+            <div class="flex items-center gap-3 rounded-lg bg-ink/50 px-4 py-3 text-sm" data-page-node-id="DK1r5gZzpRbiSXDSWKYcmh"><span class="text-muted cursor-move" data-page-node-id="SdKt23HIB6TIGka2i2qCxC">⠿</span><span class="flex-1 truncate" data-page-node-id="9woXVBGY5ncHTLjSj98bt8">outro.mp4</span><span class="text-muted text-xs" data-page-node-id="5y9d9AMENw1fZ1dLksmAxj">00:00:18</span></div>
+          </div>
+          <button class="mt-3 w-full border border-dashed border-panel2 rounded-lg py-2.5 text-sm text-muted hover:border-brand hover:text-brand transition-colors cursor-pointer" data-page-node-id="KV9xQ4MV0YhmBDBGCJ06kW">+ 添加文件</button>
+          <div class="flex items-center gap-2 mt-4" data-page-node-id="dZD9nAyGuov3dbDi5hMGPD">
+            <span class="text-xs text-muted" data-page-node-id="kXvw7aPdhAwGyIgkooAl8N">合并方式</span>
+            <div class="flex gap-1" id="mergeMode" data-page-node-id="STmIry9A3Bv8JOyePtNESo">
+              <button class="seg-btn active px-3 py-1 rounded-md border border-panel2 text-xs" data-m="concat" data-page-node-id="bOp8RxyBrFAFTHnp42pL4l">流拼接(同编码)</button>
+              <button class="seg-btn px-3 py-1 rounded-md border border-panel2 text-xs" data-m="filter" data-page-node-id="Em0CWDvgwzS6ISTT5nIWtu">滤镜拼接(任意)</button>
+            </div>
+          </div>
+        </div>
+      </div></section>
+
+      <!-- ===== EXTRACT ===== -->
+      <section class="tab-pane" data-pane="extract" data-page-node-id="Gpg5QCX3PgCXWHSSXQj9DP"><div class="space-y-6" data-page-node-id="DL4cZBxggu4psTjDuVV4yE">
+        <div id="extCmd" data-page-node-id="nPOSZP3XM2bhtgRxwJalTD"></div>
+        <div class="card rounded-2xl p-5" data-page-node-id="FyQoXQdnwxAzYpMwKmT5o4">
+          <div class="flex gap-1 mb-5" id="extTabs" data-page-node-id="nSsJ2i8CucXqiV7pICSboR">
+            <button class="seg-btn active px-4 py-2 rounded-lg border border-panel2 text-sm" data-t="audio" data-page-node-id="mxAjzdWDfjvcTzAe1RNlwH">提取音频</button>
+            <button class="seg-btn px-4 py-2 rounded-lg border border-panel2 text-sm" data-t="video" data-page-node-id="qmPxFOwxyYBqDApEr6Q7oq">提取视频</button>
+            <button class="seg-btn px-4 py-2 rounded-lg border border-panel2 text-sm" data-t="frame" data-page-node-id="MME8qA4mrcQWXxk40sAVhP">抽取帧</button>
+            <button class="seg-btn px-4 py-2 rounded-lg border border-panel2 text-sm" data-t="thumb" data-page-node-id="M76gyN6u8ofSurx7V4H3K1">缩略图</button>
+          </div>
+          <div id="extBody" class="space-y-4 text-sm" data-page-node-id="cOznQ0AJ0PHygSAK872iO8"></div>
+        </div>
+      </div></section>
+
+      <!-- ===== WATERMARK ===== -->
+      <section class="tab-pane" data-pane="watermark" data-page-node-id="dB321niOz8RHLWqT2Ifr3i"><div class="space-y-6" data-page-node-id="hFJddJmDBOC7yVY5oeAYjQ">
+        <div id="wmCmd" data-page-node-id="WljACeRtN4xtvyCICCDHj9"></div>
+        <div class="card rounded-2xl p-5 space-y-5" data-page-node-id="KSVoFeUPX6gINuDnkwMfIm">
+          <div class="flex gap-1" id="wmType" data-page-node-id="i55AvnFIDqcOnFJSx5wqkg">
+            <button class="seg-btn active px-4 py-2 rounded-lg border border-panel2 text-sm" data-t="image" data-page-node-id="vfauxzIymlkTEa0FY5z6hA">图片水印</button>
+            <button class="seg-btn px-4 py-2 rounded-lg border border-panel2 text-sm" data-t="text" data-page-node-id="C36cA7Y1LWDmYym76oBa8k">文字水印</button>
+            <button class="seg-btn px-4 py-2 rounded-lg border border-panel2 text-sm" data-t="sub" data-page-node-id="IHs2Dhp3FvydsuBDg6G4rr">硬字幕</button>
+          </div>
+          <div id="wmBody" class="space-y-4 text-sm" data-page-node-id="1Vka5MrGZ0fZNS8T4XJc0l"></div>
+        </div>
+      </div></section>
+
+      <!-- ===== FILTERS ===== -->
+      <section class="tab-pane" data-pane="filters" data-page-node-id="XDYMYDUHh6mIAKS7vrjOHO"><div class="space-y-6" data-page-node-id="H6g2D8Wxb9JVriUnQDKgxD">
+        <div id="filterCmd" data-page-node-id="8r9tVOFbC0WfJs7ZWd3PCP"></div>
+        <div class="card rounded-2xl p-5" data-page-node-id="N1LHsCpZ1Kv6Ce7izCEN4d">
+          <h3 class="font-semibold mb-4" data-page-node-id="giBR5X8dH8tp3swsFE3o6R">滤镜链 (可叠加)</h3>
+          <div class="grid sm:grid-cols-2 gap-3" id="filterGrid" data-page-node-id="2C0ABh6wyjprnY28Ei7k48"></div>
+          <div class="mt-5" data-page-node-id="YvW4uUEJgQvwESTumwY8Jx"><label class="text-xs text-muted" data-page-node-id="lOPeFza7zeejy6G0lXOI7w">自定义滤镜参数 (高级)</label>
+            <input id="customFilter" placeholder="如 eq=brightness=0.1:contrast=1.2" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none font-mono" data-page-node-id="Eg24iXC3kTGmbR0wn8Dd2D"></div>
+        </div>
+      </div></section>
+
+      <!-- ===== RECORD ===== -->
+      <section class="tab-pane" data-pane="record" data-page-node-id="y4CIosZ3x35Dzh7fjHkmft"><div class="space-y-6" data-page-node-id="fcLL8BgL5iwZXUdQksSNGK">
+        <div id="recCmd" data-page-node-id="eBrceHykEQdr1UZZNlBLX9"></div>
+        <div class="card rounded-2xl p-5 space-y-5" data-page-node-id="3CLdsY8cVMaurlfGlEpyyo">
+          <div class="flex gap-1" id="recSrc" data-page-node-id="mDAF645Ahuo7oMy6DOjeKG">
+            <button class="seg-btn active px-4 py-2 rounded-lg border border-panel2 text-sm" data-s="screen" data-page-node-id="CePvBTLRJ9ySDHjffxlNhL">屏幕录制</button>
+            <button class="seg-btn px-4 py-2 rounded-lg border border-panel2 text-sm" data-s="cam" data-page-node-id="ZkfvGpa8lNa8LoiM6aZ5FC">摄像头</button>
+            <button class="seg-btn px-4 py-2 rounded-lg border border-panel2 text-sm" data-s="both" data-page-node-id="qFmHbGyqu9k8hyI087Bt3v">画中画</button>
+          </div>
+          <div class="grid md:grid-cols-2 gap-4" data-page-node-id="hcOyTybpeOo4lbfTHaSEQP">
+            <div data-page-node-id="82HJy9RvY55X9HEgpJcSr8"><label class="text-xs text-muted" data-page-node-id="IG9YikBnBPpOqbrb9E7aVL">视频源</label><select id="recVid" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" data-page-node-id="cqja2hYWTEnLVhzJ7BBk8r"><option data-page-node-id="CCMKBAh2A1UGjzJ0p47Q4A">显示器 1 (1920×1080)</option><option data-page-node-id="sUYBIXcC3JuxOojgGpiEtr">显示器 2</option></select></div>
+            <div data-page-node-id="ov5nChqQ1egPbgQHVuJbz4"><label class="text-xs text-muted" data-page-node-id="QX12TZ1ypaiqJCFlCABYh8">音频源</label><select id="recAud" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" data-page-node-id="4FSTj0rh96g50nX53e15ci"><option data-page-node-id="rjwdhuwU8imjcVAEzd3To5">系统音频</option><option data-page-node-id="dQCzJOMKQfJjiGtOkYHWll">麦克风</option><option data-page-node-id="Oh5LlEQDOoPR9vlqXIn0DU">系统 + 麦克风</option><option data-page-node-id="6jm3f0d03zHHWnqGSSeo4u">无声</option></select></div>
+            <div data-page-node-id="CfFROEGpmHxuVpGBHwwIuJ"><label class="text-xs text-muted" data-page-node-id="HeCy5f1fwbGdlXrnbD1l9A">帧率</label><select id="recFps" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" data-page-node-id="ACAKKZgW8iNOEWnmCbDfhG"><option data-page-node-id="TXN4s3zTZnDWfJguRiv57G">30</option><option data-page-node-id="KK2JWQo126ABzAAkrAju3f">60</option><option data-page-node-id="Nx7wvVB6gFLpCJ9LImtGrR">24</option></select></div>
+            <div data-page-node-id="GZ6GDmfuKZOujBiJW2lROg"><label class="text-xs text-muted" data-page-node-id="tuW3KusA7gk3pWMo6p0PRT">输出格式</label><select id="recFmt" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" data-page-node-id="eGOB1PeAv4kBCOeZFVWeXO"><option data-page-node-id="6wLvvu4hysA8In6Dp7G7nd">mp4</option><option data-page-node-id="yPZyOWrEmTI39R7EbpxsYN">mkv</option><option data-page-node-id="skeU5U4B4ME4kv7ysqwVgC">mov</option></select></div>
+          </div>
+          <div class="flex items-center gap-3" data-page-node-id="ko4dDEmKrSC40J11MGJgJE">
+            <button class="px-5 py-2.5 rounded-lg bg-brand text-white font-bold hover:bg-brandd transition-colors cursor-pointer flex items-center gap-2" data-page-node-id="hJhIN73idgZ76wZsehx7G2"><span class="w-2.5 h-2.5 rounded-full bg-ink" data-page-node-id="LUo27Osw7CBXn40OBPmuYJ"></span>开始录制</button>
+            <span class="text-xs text-muted" data-page-node-id="v5he7TnQowTsCAp34jA5UI">00:00:00</span>
+          </div>
+        </div>
+      </div></section>
+
+      <!-- ===== STREAM ===== -->
+      <section class="tab-pane" data-pane="stream" data-page-node-id="DkpOVubWyqAawYpXLQtmue"><div class="space-y-6" data-page-node-id="mAga3UOTTB0HYXE92w6IBe">
+        <div id="streamCmd" data-page-node-id="DbngOcVFWXex06aIKpZEKl"></div>
+        <div class="card rounded-2xl p-5 space-y-5" data-page-node-id="uFngWOCzRFYf2S1JEStyzV">
+          <div class="flex gap-1" id="streamMode" data-page-node-id="JEdGo25NPbwkygT35rWjTL">
+            <button class="seg-btn active px-4 py-2 rounded-lg border border-panel2 text-sm" data-m="push" data-page-node-id="3BAnKQlv75gcv1UxNE5x5h">推流</button>
+            <button class="seg-btn px-4 py-2 rounded-lg border border-panel2 text-sm" data-m="pull" data-page-node-id="GPgAH8KdUnWJx1TBHy0dkx">拉流录制</button>
+          </div>
+          <div class="grid md:grid-cols-2 gap-4" data-page-node-id="2MsgW1K5PUuGICjB2gjRuG">
+            <div class="md:col-span-2" data-page-node-id="1PInDTluviuAp998ycGUEg"><label class="text-xs text-muted" data-page-node-id="POaugFcvN4AAjk6a7257lU">协议 / 地址</label>
+              <select id="streamProto" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" data-page-node-id="CoJXCoijnZa9BgPe8t9GIs"><option data-page-node-id="APMRb20tNfrbUIFxAiapb5">RTMP</option><option data-page-node-id="wJ30RQc4MDcm1wGcVNkD38">HLS</option><option data-page-node-id="9NawEMFzW3LxHrnE2LLb6J">RTSP</option><option data-page-node-id="xCAGM18qNs1KDSIlzNzf1A">HTTP-FLV</option></select></div>
+            <div class="md:col-span-2" data-page-node-id="hv0zPDTt0fKrv1zG9g1tan"><label class="text-xs text-muted" data-page-node-id="EWEG1ZDhjOyiCujspTmk5Z">服务器地址</label><input id="streamUrl" value="rtmp://live.example.com/app/stream" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none font-mono" data-page-node-id="nTnopxS1RvSAGAlHo9zkHw"></div>
+            <div data-page-node-id="Y3OUbU6LOwX9jLYj9UiPbg"><label class="text-xs text-muted" data-page-node-id="7ksWmYwwiRKOJ4cFXYDEiI">视频码率</label><input id="streamVbr" value="4000k" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" data-page-node-id="XSe0p7Ho7U4NRiSD6OnaRh"></div>
+            <div data-page-node-id="qWNTPHy0RZFChRve94n218"><label class="text-xs text-muted" data-page-node-id="KHda0mlHMLyB74dT9Hqker">音频码率</label><input id="streamAbr" value="128k" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" data-page-node-id="b2hwguEAG0QyTy33WpCAU3"></div>
+          </div>
+        </div>
+      </div></section>
+
+      <!-- ===== BATCH ===== -->
+      <section class="tab-pane" data-pane="batch" data-page-node-id="CfQlgeX1LNk3WOEGBPMKkT"><div class="space-y-6" data-page-node-id="BA0lCTo43xtaxq3H0l27FV">
+        <div id="batchCmd" data-page-node-id="jA5t7f4WTvHxqsfbQVrZqT"></div>
+        <div class="card rounded-2xl p-5 space-y-4" data-page-node-id="FJuOHxkyVUP6W1PeOZYWdf">
+          <div class="rounded-xl border-2 border-dashed border-panel2 bg-ink/40 p-6 text-center cursor-pointer hover:border-brand transition-colors" onclick="addBatch()" data-page-node-id="vzvxK7OE8rE6zQ4Fv72tod">
+            <div class="font-semibold" data-page-node-id="1FRkDhNbh8qUanTLBSQqbz">+ 添加多个文件进行批量处理</div>
+            <div class="text-xs text-muted mt-1" data-page-node-id="ObGxhckUppu0YEdrHZ6OMD">已选择 <span id="batchCount" data-page-node-id="ID25oNOGLd7irqXop1HeyY">0</span> 个文件</div>
+          </div>
+          <div class="grid md:grid-cols-3 gap-4 text-sm" data-page-node-id="WpquRRzAFGcPatLD4gfoAG">
+            <div data-page-node-id="GY6yC37XHF2nHwFwmy9a7Z"><label class="text-xs text-muted" data-page-node-id="mai1NRwXBjeRabeqghbbCo">批量操作</label><select id="batchOp" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" data-page-node-id="05DwtymEiGo2gvUs0zLYyB"><option value="convert" data-page-node-id="GofAmjLWy483kHKZCxqE0k">统一转格式</option><option value="compress" data-page-node-id="xZgpAbz5SHtm4OPhYgsTZV">统一压缩</option><option value="extract" data-page-node-id="qejzqSCK9HFNCuJBQtgqcC">批量提取音频</option><option value="thumb" data-page-node-id="j94GoNbOZ2QBAyGs6Moxbx">批量缩略图</option></select></div>
+            <div data-page-node-id="zqZ3ioT7Z3Vng84xmmrzG3"><label class="text-xs text-muted" data-page-node-id="4iUWzEFvlnSRgaKg5Q6njs">目标格式</label><select id="batchFmt" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" data-page-node-id="AbY95HpauwiVo4lgj8q80c"><option data-page-node-id="HyzIIK2TU6HzCHtAq9SRDJ">mp4</option><option data-page-node-id="OKl1VE8nUahNmsnZd1Ofzu">mkv</option><option data-page-node-id="ULNe6nRC8dezFbXF4vJF4C">mp3</option><option data-page-node-id="QZLfLCorHIxEylV0xRBKBK">webm</option></select></div>
+            <div data-page-node-id="KJuQrhZKaKED9yU3JCLSjX"><label class="text-xs text-muted" data-page-node-id="lYBJhQ8bbv5WPwklAjs3MX">输出目录</label><input value="./output" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none font-mono" data-page-node-id="2dZPhhvxGKuI3C2wDCRt3C"></div>
+          </div>
+          <button id="runBatchBtn" class="w-full py-3 rounded-lg bg-brand text-white font-bold hover:bg-brandd transition-colors cursor-pointer" onclick="runBatch()" data-page-node-id="J1lggMWzdnvww4qtnlhMEF">开始批量处理</button>
+        </div>
+      </div></section>
+
+      <!-- ===== SETTINGS ===== -->
+      <section class="tab-pane" data-pane="settings" data-page-node-id="b0EDjFdJcl4ebHtHHZlpNU"><div class="max-w-2xl space-y-5" data-page-node-id="mQxSmndUm6VwM96VVxpe43">
+        <div class="card rounded-2xl p-5 space-y-4" data-page-node-id="fugJnGAeobBGklaBap5nM9">
+          <h3 class="font-semibold" data-page-node-id="dAzsVAAABHdfplEKzKsdgc">FFmpeg 引擎</h3>
+          <div data-page-node-id="GaOE8oQltA0yCufGNn2r1N"><label class="text-xs text-muted" data-page-node-id="O2qNITRuNkjsTln3azOFeL">可执行文件位置</label><div class="flex gap-2 mt-1" data-page-node-id="YCQet6FjI7MTgUKSbdfxFx"><input value="C:\ffmpeg\bin\ffmpeg.exe" class="flex-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none font-mono" data-page-node-id="TeHJKmYcaYDjcI4dIJuxwq"><button class="px-3 py-2 rounded-lg border border-panel2 text-sm hover:border-brand cursor-pointer" data-page-node-id="qcZECRcDGwTR8l1jXCFnAF">浏览</button></div></div>
+          <div class="flex items-center justify-between rounded-lg bg-ink/50 px-4 py-3" data-page-node-id="wbNSXPhZZfHvM2F5cCdmuN"><div data-page-node-id="L4kLGqZNvSgT5v5BMoDnpT"><div class="text-sm font-medium" data-page-node-id="XkNjekmn7nQA2fIFxBKtNP">版本检测</div><div class="text-xs text-muted" data-page-node-id="W66VGwpfyliQmF5u4UnuXr">ffmpeg 6.1.1 · ffprobe 6.1.1 · 编码器 48</div></div><span class="px-2 py-1 rounded-md bg-brand/15 text-brand text-xs font-bold" data-page-node-id="mYNvP8WnPo1xZaDmalgXyK">正常</span></div>
+        </div>
+        <div class="card rounded-2xl p-5 space-y-4" data-page-node-id="GZPsqLYDoOGJgBVLDeJwan">
+          <h3 class="font-semibold" data-page-node-id="aokz9vYWitPovvzZTjmFg8">默认输出</h3>
+          <div class="grid md:grid-cols-2 gap-4 text-sm" data-page-node-id="1QI1UFJQvod0Axg3eNM4zI">
+            <div data-page-node-id="TKEHruUlTjK7jQlkJbMyRy"><label class="text-xs text-muted" data-page-node-id="kPIQRFPtVHylHg2R2WvCBC">默认容器</label><select class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" data-page-node-id="4nG7fVECjgerCmrBtsEJ4R"><option data-page-node-id="LYOPUFo5u0K9meM9mRufEV">mp4</option><option data-page-node-id="BQgo2d85GMiJdqXTPjSYKu">mkv</option></select></div>
+            <div data-page-node-id="qdpOlqHICjLQXcYWYZGUTx"><label class="text-xs text-muted" data-page-node-id="tVHnThv8NPA205xScV6e9Z">默认 CRF</label><input value="23" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" data-page-node-id="VK2u4Vnk78nVyCk5NLou1k"></div>
+            <label class="flex items-center gap-2 cursor-pointer" data-page-node-id="RCF29t50zv3XCVsHY5BTof"><input type="checkbox" class="accent-brand" checked data-page-node-id="lwsgHtyOPWyvjA3lGsNIri"> 完成后通知</label>
+            <label class="flex items-center gap-2 cursor-pointer" data-page-node-id="CJSP3YtmASf7LVyHk6NaYP"><input type="checkbox" class="accent-brand" data-page-node-id="IcPMAzwUtyjjHqWy6KBtbg"> 覆盖已存在文件</label>
+          </div>
+        </div>
+        <div class="card rounded-2xl p-5 flex items-center justify-between" data-page-node-id="6akUDN6rTEHFcwUV8Iq2g5">
+          <div data-page-node-id="8mn9ZjOYZ6hmyL0DQ5sM91"><div class="font-semibold" data-page-node-id="JDwGoPlDiiz5eP2ALTVDXv">外观主题</div><div class="text-xs text-muted" data-page-node-id="Fxx4LSVcEzBFCYrQO2HUmv">深色 / 浅色</div></div>
+          <button onclick="toggleTheme()" class="px-4 py-2 rounded-lg bg-brand text-white font-bold cursor-pointer hover:bg-brandd transition-colors" data-page-node-id="EY0GRYGEDVNVxGJxOtDaMi">切换</button>
+        </div>
+      </div></section>
+
+      <!-- ===== TASKS PAGE ===== -->
+      <section class="tab-pane" data-pane="tasks" data-page-node-id="tasksPage">
+        <div class="flex items-center justify-between mb-5">
+          <p class="text-sm text-muted">这里汇总所有已提交的任务，进度为演示模拟。</p>
+          <button onclick="clearDone()" class="px-3 py-2 rounded-lg border border-panel2 text-sm hover:border-brand cursor-pointer transition-colors">清空已完成</button>
+        </div>
+        <div class="grid grid-cols-4 gap-4 mb-5">
+          <div class="card rounded-2xl p-4"><div class="text-xs text-muted">总任务</div><div class="text-2xl font-extrabold mt-1" id="statTotal">0</div></div>
+          <div class="card rounded-2xl p-4"><div class="text-xs text-muted">排队中</div><div class="text-2xl font-extrabold mt-1 text-amber-500" id="statQueued">0</div></div>
+          <div class="card rounded-2xl p-4"><div class="text-xs text-muted">进行中</div><div class="text-2xl font-extrabold mt-1 text-brand" id="statRun">0</div></div>
+          <div class="card rounded-2xl p-4"><div class="text-xs text-muted">已完成</div><div class="text-2xl font-extrabold mt-1 text-emerald-500" id="statDone">0</div></div>
+        </div>
+        <div id="taskList" class="space-y-3"></div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<!-- task drawer removed: queue is now a dedicated nav page -->
+
+<!-- ===== TOAST ===== -->
+<div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 hidden bg-panel border border-panel2 px-5 py-3 rounded-xl text-sm shadow-glow" data-page-node-id="i4nSuS85aFLHHY7PTjVuyu"></div>
+
+<script>
+/* ---------- 数据 ---------- */
+const quick = [
+  ['格式转换','convert'],['压缩优化','compress'],['剪辑分割','cut'],['拼接合并','merge'],
+  ['提取分离','extract'],['水印字幕','watermark'],['滤镜调色','filters'],['录制采集','record'],
+  ['流媒体','stream'],['批量处理','batch'],
+];
+const recent = [
+  ['demo_record.mov','2026-09-29 21:40','124 MB'],
+  ['lecture_01.mp4','2026-09-29 18:12','880 MB'],
+  ['podcast_ep12.wav','2026-09-28 22:03','312 MB'],
+  ['screen_cap.mkv','2026-09-28 15:47','2.1 GB'],
+];
+const filters = [
+  ['scale','缩放', 'scale=1280:720'],
+  ['crop','裁剪', 'crop=1000:600:140:60'],
+  ['rotate','旋转90°', 'transpose=1'],
+  ['eq','调色', 'eq=brightness=0.05:contrast=1.1'],
+  ['denoise','降噪', 'hqdn3d'],
+  ['sharpen','锐化', 'unsharp=5:5:1.2'],
+  ['fade','淡入淡出', 'fade=t=in:st=0:d=1'],
+  ['deint','去隔行', 'yadif'],
+  ['volume','音量', 'volume=1.3'],
+  ['loudnorm','响度归一', 'loudnorm=I=-16'],
+];
+let filterState = {};
+let extTab='audio', wmTab='image', recSrc='screen', streamMode='push';
+let tasks = [];
+let batchFiles = [];
+let lastCmd = '';        // 当前模块生成的命令，供加入队列时带入任务卡
+let lastBatchCmds = [];  // 批处理每条文件的命令
+
+/* ---------- 初始化 ---------- */
+function $(id){return document.getElementById(id);}
+function render(){
+  // quick actions
+  $('quickActions').innerHTML = quick.map(q=>`<button onclick="goto('${q[1]}')" class="rounded-xl border border-panel2 bg-ink/40 py-3 text-sm font-medium hover:border-brand hover:text-brand transition-colors cursor-pointer">${q[0]}</button>`).join('');
+  $('recentList').innerHTML = recent.map(r=>`<div class="flex items-center gap-3"><div class="w-9 h-9 rounded-lg bg-ink/60 flex items-center justify-center text-brand">▦</div><div class="flex-1 min-w-0"><div class="truncate font-medium">${r[0]}</div><div class="text-xs text-muted">${r[1]}</div></div><div class="text-xs text-muted">${r[2]}</div></div>`).join('');
+  // filters grid
+  $('filterGrid').innerHTML = filters.map(f=>`<button data-f="${f[0]}" class="filter-chip rounded-xl border border-panel2 bg-ink/40 px-4 py-3 text-left hover:border-brand transition-colors cursor-pointer"><div class="font-medium text-sm">${f[1]}</div><div class="text-[11px] text-muted font-mono truncate">${f[2]}</div></button>`).join('');
+  document.querySelectorAll('.filter-chip').forEach(b=>b.onclick=()=>{const k=b.dataset.f;filterState[k]=!filterState[k];b.classList.toggle('active',filterState[k]);buildCmds();});
+  buildCmds();
+}
+
+/* ---------- 命令预览卡片模板 ---------- */
+function cmdCard(title, cmd){
+  lastCmd = cmd;
+  return `<div><div class="card rounded-2xl p-5">
+    <div class="flex items-center justify-between mb-3"><h3 class="font-semibold text-sm">${title}</h3>
+    <button onclick="copyCmd(this)" class="text-xs text-muted hover:text-brand cursor-pointer">复制</button></div>
+    <pre class="cmd bg-ink/70 rounded-xl p-3 text-brand overflow-x-auto whitespace-pre">${cmd}</pre>
+    <button onclick="queueTask('${title.replace(/'/g,"")}')" class="mt-3 w-full py-2.5 rounded-lg bg-brand text-white font-bold hover:bg-brandd transition-colors cursor-pointer">加入队列并运行</button>
+  </div></div>`;
+}
+
+/* ---------- 各模块命令生成 ---------- */
+function buildCmds(){
+  // CONVERT
+  const fmt=$('convFmt').value, enc=$('convEnc').value;
+  const q=document.querySelector('#convQuality .active')?.dataset.q||'23';
+  const res=$('convRes').value, aud=$('convAud').value;
+  const vf=[]; if(res) vf.push(`scale=${res}`); if($('convDeint').checked) vf.push('yadif');
+  let c=`ffmpeg -i input.${fmt==='mp3'?'mp4':'mov'}`;
+  if(enc==='copy') c+=` -c copy`; else { c+=` -c:v ${enc} -crf ${q}`; if(vf.length) c+=` -vf ${vf.join(',')}`; c+=` -c:a ${aud}`; }
+  if($('convFaststart').checked) c+=` -movflags +faststart`;
+  if($('convNorm').checked) c+=` -af loudnorm`;
+  c+=` output.${fmt}`;
+  $('convCmd').innerHTML=cmdCard('格式转换 · 命令预览', c);
+
+  // COMPRESS
+  const crf=$('crf').value, preset=document.querySelector('#presetGroup .active')?.dataset.p||'medium';
+  const cres=$('cmpRes').value, cbr=$('cmpBitrate').value;
+  let cc=`ffmpeg -i input.mp4 -c:v libx265 -crf ${crf} -preset ${preset}`;
+  if(cres) cc+=` -vf scale=${cres}`; if(cbr) cc+=` -b:v ${cbr}`;
+  cc+=` -c:a aac -b:a 128k output.mp4`;
+  $('cmpCmd').innerHTML=cmdCard('压缩优化 · 命令预览', cc);
+
+  // CUT
+  const s=$('cutStart').value,e=$('cutEnd').value,m=document.querySelector('#cutMode .active')?.dataset.m||'re';
+  let cu=`ffmpeg -ss ${s} -to ${e} -i input.mp4`;
+  cu+= m==='copy' ? ` -c copy output.mp4` : ` -c:v libx264 -crf 23 -c:a aac output.mp4`;
+  $('cutCmd').innerHTML=cmdCard('剪辑分割 · 命令预览', cu);
+
+  // MERGE
+  const mm=document.querySelector('#mergeMode .active')?.dataset.m||'concat';
+  let me = mm==='concat'
+    ? `ffmpeg -f concat -safe 0 -i list.txt -c copy merged.mp4`
+    : `ffmpeg -i a.mp4 -i b.mp4 -filter_complex "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[v][a]" -map "[v]" -map "[a]" merged.mp4`;
+  $('mergeCmd').innerHTML=cmdCard('拼接合并 · 命令预览', me);
+
+  // EXTRACT
+  let ex;
+  if(extTab==='audio') ex=`ffmpeg -i input.mp4 -vn -c:a copy output.m4a`;
+  else if(extTab==='video') ex=`ffmpeg -i input.mp4 -an -c:v copy output.mp4`;
+  else if(extTab==='frame') ex=`ffmpeg -i input.mp4 -ss 00:00:05 -frames:v 1 frame.png`;
+  else ex=`ffmpeg -i input.mp4 -vf fps=1/10 thumb_%03d.png`;
+  $('extCmd').innerHTML=cmdCard('提取分离 · 命令预览', ex);
+
+  // WATERMARK
+  let wm;
+  if(wmTab==='image') wm=`ffmpeg -i in.mp4 -i logo.png -filter_complex "overlay=W-w-20:20" out.mp4`;
+  else if(wmTab==='text') wm=`ffmpeg -i in.mp4 -vf "drawtext=text='Demo':x=20:y=20:fontsize=28:fontcolor=white" out.mp4`;
+  else wm=`ffmpeg -i in.mp4 -vf "subtitles=sub.srt" out.mp4`;
+  $('wmCmd').innerHTML=cmdCard('水印字幕 · 命令预览', wm);
+
+  // FILTERS
+  let chain=filters.filter(f=>filterState[f[0]]).map(f=>f[2]);
+  const cf=$('customFilter').value.trim(); if(cf) chain.push(cf);
+  let fc = chain.length ? `ffmpeg -i input.mp4 -vf "${chain.join(',')}" output.mp4` : `ffmpeg -i input.mp4 -c copy output.mp4  # 未选择滤镜`;
+  $('filterCmd').innerHTML=cmdCard('滤镜调色 · 命令预览', fc);
+
+  // RECORD
+  let rc;
+  if(recSrc==='screen') rc=`ffmpeg -f gdigrab -framerate ${$('recFps').value} -i desktop -f dshow -i audio="${$('recAud').value}" out.${$('recFmt').value}`;
+  else if(recSrc==='cam') rc=`ffmpeg -f dshow -i video="Integrated Camera":audio="${$('recAud').value}" out.${$('recFmt').value}`;
+  else rc=`ffmpeg -f dshow -i video="Integrated Camera" -f gdigrab -i desktop -filter_complex overlay out.${$('recFmt').value}`;
+  $('recCmd').innerHTML=cmdCard('录制采集 · 命令预览', rc);
+
+  // STREAM
+  let sc;
+  if(streamMode==='push') sc=`ffmpeg -re -i input.mp4 -c:v libx264 -b:v ${$('streamVbr').value} -c:a aac -b:a ${$('streamAbr').value} -f flv ${$('streamUrl').value}`;
+  else sc=`ffmpeg -i "${$('streamUrl').value}" -c copy record.${$('streamProto').value==='HLS'?'m3u8':'mp4'}`;
+  $('streamCmd').innerHTML=cmdCard('流媒体 · 命令预览', sc);
+
+  // BATCH
+  renderBatchCmd();
+
+  bindCopy();
+}
+
+/* ---------- 交互绑定 ---------- */
+function bindSeg(group, cb){
+  document.querySelectorAll(`#${group} .seg-btn`).forEach(b=>b.onclick=()=>{
+    document.querySelectorAll(`#${group} .seg-btn`).forEach(x=>x.classList.remove('active'));
+    b.classList.add('active'); cb&&cb(b); buildCmds();
+  });
+}
+function bindCopy(){document.querySelectorAll('[onclick^="copyCmd"]').forEach(b=>{});}
+
+function copyCmd(btn){
+  const card=btn.closest('.card');
+  const nodes=card.querySelectorAll('pre, .cmd');
+  const text=Array.from(nodes).map(n=>n.textContent).join('\n');
+  if(navigator.clipboard && window.isSecureContext){
+    navigator.clipboard.writeText(text).then(()=>toast('已复制命令到剪贴板')).catch(()=>fallbackCopy(text));
+  } else { fallbackCopy(text); }
+}
+function fallbackCopy(text){
+  const ta=document.createElement('textarea');
+  ta.value=text; ta.style.position='fixed'; ta.style.opacity='0';
+  document.body.appendChild(ta); ta.select();
+  try{ document.execCommand('copy'); toast('已复制命令到剪贴板'); }
+  catch(e){ toast('复制失败，请手动选择'); }
+  document.body.removeChild(ta);
+}
+
+/* nav + tabs */
+const titles={dashboard:['工作台','总览与快速开始'],convert:['格式转换','容器互转与编解码'],compress:['压缩优化','CRF / 预设 / 码率控制'],cut:['剪辑分割','时间轴精确截取'],merge:['拼接合并','多文件顺序合并'],extract:['提取分离','音视频 / 帧 / 缩略图'],watermark:['水印字幕','图片 / 文字 / 硬字幕'],filters:['滤镜调色','叠加式滤镜链'],record:['录制采集','屏幕 / 摄像头 / 画中画'],stream:['流媒体','RTMP / HLS 推拉流'],batch:['批量处理','目录级批处理'],settings:['设置','引擎与默认项'],tasks:['任务队列','运行中的任务与历史']};
+function goto(tab){
+  document.querySelectorAll('.tab-pane').forEach(p=>p.classList.toggle('active',p.dataset.pane===tab));
+  document.querySelectorAll('aside .nav-item').forEach(n=>n.classList.toggle('nav-active',n.dataset.tab===tab));
+  $('pageTitle').textContent=titles[tab][0]; $('pageSub').textContent=titles[tab][1];
+  $('content').scrollTop=0;
+  if(tab==='extract') renderExt(); if(tab==='watermark') renderWm();
+  if(tab==='tasks') renderTasks();
+  closeSidebar();
+}
+function closeSidebar(){ if(window.innerWidth<1024){ $('sidebar').classList.add('-translate-x-full'); $('sideBackdrop').classList.add('hidden'); } }
+function toggleSidebar(){ const a=$('sidebar'); a.classList.toggle('-translate-x-full'); $('sideBackdrop').classList.toggle('hidden'); }
+document.querySelectorAll('aside .nav-item').forEach(n=>n.onclick=()=>goto(n.dataset.tab));
+
+/* sliders + selects -> live */
+['crf','convFmt','convEnc','convRes','convAud','cmpRes','cmpBitrate','cutStart','cutEnd','cutDur','recFps','recFmt','streamUrl','streamVbr','streamAbr','customFilter','batchOp','batchFmt'].forEach(id=>{
+  $(id)&&$(id).addEventListener('input',buildCmds);
+});
+['convFaststart','convDeint','convNorm'].forEach(id=>$(id)&&$(id).addEventListener('change',buildCmds));
+
+bindSeg('convQuality'); bindSeg('presetGroup'); bindSeg('cutMode'); bindSeg('mergeMode');
+bindSeg('extTabs',b=>{extTab=b.dataset.t;renderExt();});
+bindSeg('wmType',b=>{wmTab=b.dataset.t;renderWm();});
+bindSeg('recSrc',b=>{recSrc=b.dataset.s;buildCmds();});
+bindSeg('streamMode',b=>{streamMode=b.dataset.m;buildCmds();});
+
+/* ---------- 剪辑时间轴交互 ---------- */
+const TL_TOTAL=252; // 总时长 00:04:12
+function hms2s(h){const p=String(h).split(':').map(Number);return p.length===3?p[0]*3600+p[1]*60+p[2]:p.length===2?p[0]*60+p[1]:p[0]||0;}
+function s2hms(s){s=Math.max(0,Math.round(s));const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return [h,m,x].map(v=>String(v).padStart(2,'0')).join(':');}
+function tlSet(iP,oP){$('tlBand').style.left=iP+'%';$('tlBand').style.right=(100-oP)+'%';$('tlIn').style.left=iP+'%';$('tlOut').style.left=oP+'%';}
+function syncTL(){const i=Math.min(hms2s($('cutStart').value),TL_TOTAL),o=Math.min(hms2s($('cutEnd').value),TL_TOTAL);tlSet(i/TL_TOTAL*100,Math.max(o,i)/TL_TOTAL*100);}
+let tlPhase=0; // 0: 等入点  1: 等出点
+$('timeline').addEventListener('click',e=>{
+  const r=$('timeline').getBoundingClientRect(),pct=(e.clientX-r.left)/r.width,sec=Math.round(pct*TL_TOTAL);
+  if(tlPhase===0){ $('cutStart').value=s2hms(sec); tlPhase=1; }
+  else { const ins=hms2s($('cutStart').value); $('cutEnd').value=s2hms(Math.max(sec,ins+1)); tlPhase=0; }
+  $('cutDur').value=s2hms(Math.max(0,hms2s($('cutEnd').value)-hms2s($('cutStart').value)));
+  syncTL(); buildCmds();
+});
+['cutStart','cutEnd'].forEach(id=>$(id).addEventListener('input',()=>{tlPhase=0;syncTL();buildCmds();}));
+$('cutDur').addEventListener('input',()=>{const d=hms2s($('cutDur').value);$('cutEnd').value=s2hms(hms2s($('cutStart').value)+d);tlPhase=0;syncTL();buildCmds();});
+syncTL();
+
+/* ---------- 导航键盘可达 ---------- */
+document.querySelectorAll('aside .nav-item').forEach(n=>{
+  n.setAttribute('tabindex','0');
+  n.addEventListener('keydown',ev=>{if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();n.click();}});
+});
+
+function renderExt(){
+  const body=$('extBody');
+  if(extTab==='audio') body.innerHTML=`<label class="flex items-center gap-2"><input type="checkbox" class="accent-brand" checked> 保留原始编码 (无损 -c:a copy)</label><div><label class="text-xs text-muted">转码为</label><select class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 focus:border-brand outline-none"><option>AAC (.m4a)</option><option>MP3</option><option>FLAC</option><option>Opus</option></select></div>`;
+  else if(extTab==='video') body.innerHTML=`<label class="flex items-center gap-2"><input type="checkbox" class="accent-brand" checked> 去除音频 (-an)</label><div><label class="text-xs text-muted">视频编码</label><select class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 focus:border-brand outline-none"><option>拷贝 (不重编码)</option><option>H.264</option></select></div>`;
+  else if(extTab==='frame') body.innerHTML=`<div class="grid grid-cols-2 gap-4"><div><label class="text-xs text-muted">时间点 -ss</label><input value="00:00:05" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 focus:border-brand outline-none"></div><div><label class="text-xs text-muted">输出格式</label><select class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 focus:border-brand outline-none"><option>PNG</option><option>JPG</option></select></div></div>`;
+  else body.innerHTML=`<div class="grid grid-cols-2 gap-4"><div><label class="text-xs text-muted">间隔 (秒/帧)</label><input value="10" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 focus:border-brand outline-none"></div><div><label class="text-xs text-muted">命名</label><input value="thumb_%03d.png" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 focus:border-brand outline-none font-mono"></div></div>`;
+  buildCmds();
+}
+function renderWm(){
+  const body=$('wmBody');
+  if(wmTab==='image') body.innerHTML=`<div><label class="text-xs text-muted">水印图片</label><div class="mt-1 rounded-lg border border-panel2 bg-ink/40 px-4 py-3 text-sm flex justify-between"><span>logo.png</span><span class="text-brand cursor-pointer">选择</span></div></div><div><label class="text-xs text-muted">位置</label><div class="flex flex-wrap gap-1.5 mt-1" id="wmPos">${['左上','右上','左下','右下','居中'].map((p,i)=>`<button class="seg-btn ${i===3?'active':''} px-3 py-1 rounded-md border border-panel2 text-xs" data-p="${p}">${p}</button>`).join('')}</div></div><div><label class="text-xs text-muted">不透明度 <span id="wmOp">100</span>%</label><input type="range" min="10" max="100" value="100" class="slider w-full" oninput="$('wmOp').textContent=this.value;buildCmds()"></div>`;
+  else if(wmTab==='text') body.innerHTML=`<div><label class="text-xs text-muted">文字内容</label><input value="Demo" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 focus:border-brand outline-none"></div><div class="grid grid-cols-2 gap-4"><div><label class="text-xs text-muted">字号</label><input value="28" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 focus:border-brand outline-none"></div><div><label class="text-xs text-muted">颜色</label><input value="white" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 focus:border-brand outline-none"></div></div>`;
+  else body.innerHTML=`<div><label class="text-xs text-muted">字幕文件</label><div class="mt-1 rounded-lg border border-panel2 bg-ink/40 px-4 py-3 text-sm flex justify-between"><span>sub.srt</span><span class="text-brand cursor-pointer">选择</span></div></div><label class="flex items-center gap-2 mt-3"><input type="checkbox" class="accent-brand" checked> 烧毁字幕 (硬字幕)</label>`;
+  document.querySelectorAll('#wmPos .seg-btn').forEach(b=>b.onclick=()=>{document.querySelectorAll('#wmPos .seg-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');buildCmds();});
+  buildCmds();
+}
+
+/* ---------- 任务队列 ---------- */
+const STATUS = {
+  queued:  { label:'排队中', color:'text-amber-500',  dot:'bg-amber-500' },
+  running: { label:'进行中', color:'text-brand',      dot:'bg-brand' },
+  done:    { label:'已完成', color:'text-emerald-500',dot:'bg-emerald-500' },
+  canceled:{ label:'已取消', color:'text-red-500',    dot:'bg-red-500' },
+  failed:  { label:'失败',   color:'text-red-500',    dot:'bg-red-500' },
+};
+function fmtDur(ts){
+  if(!ts) return '';
+  const s=Math.floor((Date.now()-ts)/1000);
+  if(s<60) return `耗时 ${s}s`;
+  return `耗时 ${Math.floor(s/60)}m${s%60}s`;
+}
+function queueTask(name, cmd){
+  const id=Date.now()+Math.random();
+  tasks.unshift({id,name,cmd:cmd||lastCmd||'',status:'queued',progress:0,startedAt:null});
+  renderTasks(); toast(`已加入队列：${name}`);
+  pump();
+}
+// 一次只跑一个：其余保持「排队中」，跑完自动触发下一个
+function pump(){
+  if(tasks.some(t=>t.status==='running')) return;
+  const next=tasks.find(t=>t.status==='queued');
+  if(next){ next.status='running'; next.startedAt=Date.now(); renderTasks(); simulate(next.id); }
+}
+function simulate(id){
+  const t=tasks.find(x=>x.id===id); if(!t||t.status!=='running')return;
+  t.progress=Math.min(100,t.progress+ Math.random()*18+6);
+  renderTasks();
+  if(t.progress<100) setTimeout(()=>simulate(id),500);
+  else { t.status='done'; renderTasks(); pump(); }
+}
+function cancelTask(id){ const t=tasks.find(x=>x.id===id); if(t&&t.status==='running'){t.status='canceled';renderTasks();pump();} }
+function retryTask(id){ const t=tasks.find(x=>x.id===id); if(t&&(t.status==='failed'||t.status==='canceled')){t.status='queued';t.progress=0;t.startedAt=null;renderTasks();pump();} }
+function renderTasks(){
+  $('taskBadge').textContent=tasks.length; $('taskBadge').classList.toggle('hidden',tasks.length===0);
+  $('dashQueue').textContent=tasks.length;
+  const run=tasks.filter(t=>t.status==='running').length,
+        done=tasks.filter(t=>t.status==='done').length,
+        queued=tasks.filter(t=>t.status==='queued').length;
+  if($('statTotal'))$('statTotal').textContent=tasks.length;
+  if($('statRun'))$('statRun').textContent=run;
+  if($('statDone'))$('statDone').textContent=done;
+  if($('statQueued'))$('statQueued').textContent=queued;
+  $('taskList').innerHTML = tasks.length? tasks.map(t=>{
+    const st=STATUS[t.status]||STATUS.queued;
+    const action = t.status==='running' ? `<button onclick="cancelTask(${t.id})" class="text-xs text-muted hover:text-red-500 cursor-pointer">取消</button>`
+                 : (t.status==='failed'||t.status==='canceled') ? `<button onclick="retryTask(${t.id})" class="text-xs text-muted hover:text-brand cursor-pointer">重试</button>`
+                 : '';
+    const sub = t.status==='running' ? `进度 ${Math.round(t.progress)}%`
+              : t.status==='queued' ? '等待中…'
+              : t.status==='done' ? '处理完成'
+              : t.status==='canceled' ? '已取消' : '执行失败';
+    return `<div class="rounded-xl bg-ink/50 p-4 border border-panel2/60">
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="w-2 h-2 rounded-full ${st.dot} shrink-0"></span>
+          <span class="text-sm font-medium truncate">${t.name}</span>
+        </div>
+        <div class="flex items-center gap-3 shrink-0">
+          <span class="text-xs px-2 py-0.5 rounded-md ${st.color} bg-panel2/50">${st.label}</span>
+          ${action}
+          <button onclick="removeTask(${t.id})" class="text-xs text-muted hover:text-brand cursor-pointer">移除</button>
+        </div>
+      </div>
+      ${t.cmd?`<pre class="cmd text-[11px] bg-ink/70 rounded-lg p-2 mb-2 overflow-x-auto whitespace-pre">${t.cmd}</pre>`:''}
+      <div class="flex items-center justify-between text-[11px] text-muted mb-1">
+        <span>${sub}</span>${t.startedAt&&(t.status==='running'||t.status==='done')?`<span>${fmtDur(t.startedAt)}</span>`:''}
+      </div>
+      <div class="h-1.5 rounded-full bg-panel2 overflow-hidden"><div class="h-full ${t.status==='canceled'||t.status==='failed'?'bg-red-500':'bg-brand'} transition-all duration-300" style="width:${t.progress}%"></div></div>
+    </div>`;
+  }).join('') : `<div class="card rounded-2xl p-10 text-center text-sm text-muted">队列为空，去任意模块点击「加入队列并运行」</div>`;
+}
+function removeTask(id){ tasks=tasks.filter(t=>t.id!==id); renderTasks(); }
+function clearDone(){ tasks=tasks.filter(t=>t.status!=='done'); renderTasks(); }
+
+/* ---------- 演示交互 ---------- */
+function simulateDrop(){toast('已载入示例文件：demo_record.mov');}
+function addBatch(){
+  const n=Math.floor(Math.random()*6)+3;
+  batchFiles=Array.from({length:n},(_,i)=>`input${String(i+1).padStart(2,'0')}.mov`);
+  $('batchCount').textContent=n;
+  renderBatchCmd();
+  toast(`已添加 ${n} 个文件`);
+}
+/* 批处理：每个文件生成一条独立命令（而非 shell for 循环），运行时各自进队列 */
+function renderBatchCmd(){
+  const bop=$('batchOp').value, bfmt=$('batchFmt').value;
+  const cmds=batchFiles.map(f=>{
+    const base=f.replace(/\.[^.]+$/,'');
+    let c=`ffmpeg -i "${f}" `;
+    if(bop==='convert')        c+=`-c:v libx264 -c:a aac "out/${base}.${bfmt}"`;
+    else if(bop==='compress')  c+=`-c:v libx265 -crf 28 "out/${base}.${bfmt}"`;
+    else if(bop==='extract')   c+=`-vn -c:a copy "out/${base}.m4a"`;
+    else                       c+=`-vf fps=1/10 "out/${base}.png"`;
+    return c;
+  });
+  const body = cmds.length
+    ? cmds.map(c=>`<pre class="cmd bg-ink/70 rounded-xl p-3 mb-2 overflow-x-auto whitespace-pre">${c}</pre>`).join('')
+    : `<div class="text-sm text-muted">先点击上方「添加多个文件」，再生成命令</div>`;
+  $('batchCmd').innerHTML=`<div class="card rounded-2xl p-5">
+    <div class="flex items-center justify-between mb-3"><h3 class="font-semibold text-sm">批量处理 · 命令预览（${cmds.length} 条）</h3>
+    ${cmds.length?'<button onclick="copyCmd(this)" class="text-xs text-muted hover:text-brand cursor-pointer">复制全部</button>':''}</div>
+    ${body}</div>`;
+  $('runBatchBtn').textContent = cmds.length ? `开始批量处理（${cmds.length} 个任务）` : '开始批量处理';
+  lastBatchCmds = cmds;
+}
+function runBatch(){
+  if(!batchFiles.length){ toast('请先添加文件'); return; }
+  batchFiles.forEach((f,i)=>queueTask('批量: '+f, lastBatchCmds[i]||''));
+  toast(`已加入队列 ${batchFiles.length} 个任务`);
+}
+
+/* ---------- 主题 ---------- */
+function toggleTheme(){
+  document.documentElement.classList.toggle('dark');
+}
+
+/* ---------- toast ---------- */
+let toastTimer;
+function toast(msg){const t=$('toast');t.textContent=msg;t.classList.remove('hidden');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.add('hidden'),1800);}
+
+/* ---------- 启动 ---------- */
+render(); renderExt(); renderWm();
+</script>
+</body>
+</html>
