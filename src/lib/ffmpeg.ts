@@ -1,5 +1,5 @@
 // 各功能模块的 ffmpeg 命令构建器（从原型移植并参数化）
-import { baseName } from "./format";
+import { baseName, dirOf } from "./format";
 import { store } from "../store";
 
 /**
@@ -728,24 +728,109 @@ function buildPull(o: StreamOpts): string {
   return ffmpegCmd(parts.join(" "));
 }
 
+export type BatchOp = "convert" | "compress" | "extract" | "thumb";
+
 export interface BatchItem {
+  /** 输入文件路径 */
   file: string;
+  /** 计算出的输出文件路径（绝对或相对，取决于 outDir） */
+  out: string;
+  /** 完整 ffmpeg 命令（含 `ffmpeg` 前缀，可直接入队） */
+  cmd: string;
 }
 
 export interface BatchOpts {
   files: string[];
-  op: "convert" | "compress" | "extract" | "thumb";
+  op: BatchOp;
+  // ===== convert 专用 =====
+  /** 目标容器：mp4 / mkv / webm / mov / avi */
   fmt: string;
+  /** 视频编码：libx264 / libx265 / copy */
+  vcodec: string;
+  /** 音频编码：aac / mp3 / copy */
+  acodec: string;
+  // ===== compress 专用 =====
+  /** x265 CRF（18 高画质 … 35 高压缩） */
+  crf: number;
+  /** x265 编码预设 */
+  preset: string;
+  // ===== extract 专用 =====
+  /** 音频扩展名：m4a / mp3 / wav / flac / opus */
+  aext: string;
+  /** copy=无损拷贝，-c:a copy；reencode=按 aext 重编码 */
+  aCodec: string;
+  // ===== thumb 专用 =====
+  /** 截帧时间点，如 "00:00:01" / "10" / "0.5" */
+  ts: string;
+  /** 缩略图格式：png / jpg */
+  thumbFmt: string;
+  /** 缩略图宽度（像素），0 = 保持原始宽度 */
+  thumbW: number;
+  // ===== 输出 =====
+  /** 输出目录（绝对路径）；留空则落在每个源文件同目录 */
+  outDir: string;
 }
 
-export function buildBatch(o: BatchOpts): string[] {
+/** 音频扩展名 → 重编码时使用的编码器 */
+const BATCH_ACODEC: Record<string, string> = {
+  m4a: "aac",
+  mp3: "libmp3lame",
+  wav: "pcm_s16le",
+  flac: "flac",
+  opus: "libvorbis",
+};
+
+/**
+ * 计算单个输出路径。
+ * - outDir 给定 → 落到该目录（应由文件对话框返回已存在的目录，避免 ffmpeg 因目录不存在而失败）；
+ * - 否则 → 落在源文件同目录（dirOf）。
+ * 输出恰好等于源文件本身时追加 `.batch` 避免自覆盖（例如 mp4→mp4 同目录）。
+ */
+function batchOut(file: string, ext: string, outDir: string): string {
+  const base = baseName(file).replace(/\.[^./\\]+$/, "") || "output";
+  const dir = outDir.trim() ? outDir.trim().replace(/[\\/]$/, "") : dirOf(file);
+  const out = `${dir}/${base}.${ext}`;
+  return out.toLowerCase() === file.toLowerCase() ? `${dir}/${base}.batch.${ext}` : out;
+}
+
+export function buildBatch(o: BatchOpts): BatchItem[] {
   return o.files.map((f) => {
-    const b = baseName(f);
-    if (o.op === "convert")
-      return ffmpegCmd(`-i ${q(f)} -c:v libx264 -c:a aac "out/${b}.${o.fmt}"`);
-    if (o.op === "compress")
-      return ffmpegCmd(`-i ${q(f)} -c:v libx265 -crf 28 "out/${b}.${o.fmt}"`);
-    if (o.op === "extract") return ffmpegCmd(`-i ${q(f)} -vn -c:a copy "out/${b}.m4a"`);
-    return ffmpegCmd(`-i ${q(f)} -vf fps=1/10 "out/${b}.png"`);
+    let ext = "";
+    let body = "";
+    switch (o.op) {
+      case "convert": {
+        ext = o.fmt;
+        // 视频/音频都选「拷贝」时走 -c copy；否则按用户选择分别编码
+        if (o.vcodec === "copy" && o.acodec === "copy") {
+          body = `-i ${q(f)} -c copy`;
+        } else {
+          const vc = o.vcodec === "copy" ? "copy" : o.vcodec;
+          const ac = o.acodec === "copy" ? "copy" : o.acodec;
+          body = `-i ${q(f)} -c:v ${vc} -c:a ${ac}`;
+        }
+        break;
+      }
+      case "compress": {
+        ext = o.fmt;
+        body = `-i ${q(f)} -c:v libx265 -crf ${o.crf} -preset ${o.preset} -c:a aac -b:a 128k`;
+        break;
+      }
+      case "extract": {
+        ext = o.aext;
+        const codec = o.aCodec === "copy" ? "copy" : BATCH_ACODEC[o.aext] || "aac";
+        body = `-i ${q(f)} -vn -c:a ${codec}`;
+        break;
+      }
+      case "thumb": {
+        ext = o.thumbFmt;
+        const vf = o.thumbW > 0 ? `-vf scale=${o.thumbW}:-1 ` : "";
+        const qv = o.thumbFmt === "jpg" ? "-q:v 2 " : "";
+        // -ss 放在 -i 之前做快速定位；-vframes 1 只取单帧（封面图），不会一秒一张
+        body = `-ss ${o.ts || "00:00:01"} -i ${q(f)} ${vf}${qv}-vframes 1`;
+        break;
+      }
+    }
+    const out = batchOut(f, ext, o.outDir);
+    return { file: f, out, cmd: ffmpegCmd(`${body} ${outArg(out)}`) };
   });
 }

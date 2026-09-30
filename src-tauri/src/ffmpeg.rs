@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -1141,6 +1141,53 @@ pub async fn pick_record_dir(app: AppHandle) -> Result<Option<String>, String> {
             let _ = tx.send(path.map(|p| p.to_string()));
         });
     rx.await.map_err(|_| "目录选择失败或被取消".to_string())
+}
+
+/// 常见媒体/图片扩展名（不区分大小写），用于批处理「添加文件夹」时递归收集。
+const MEDIA_EXTS: &[&str] = &[
+    "mp4", "mkv", "mov", "avi", "webm", "flv", "wmv", "mpg", "mpeg", "ts", "m2ts", "vob", "3gp",
+    "mp3", "wav", "m4a", "flac", "aac", "opus", "ogg",
+    "jpg", "jpeg", "png", "bmp", "gif", "webp",
+];
+
+/// 选择文件夹并递归收集其中的媒体文件（用于批处理一次性加入大量文件）。
+#[tauri::command]
+pub async fn pick_folder_files(app: AppHandle) -> Result<Vec<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    use tokio::sync::oneshot;
+    let (tx, rx) = oneshot::channel::<Option<String>>();
+    app.dialog()
+        .file()
+        .set_title("选择包含媒体文件的文件夹")
+        .pick_folder(move |path| {
+            let _ = tx.send(path.map(|p| p.to_string()));
+        });
+    let dir = match rx.await.map_err(|_| "文件夹选择失败或被取消".to_string())? {
+        Some(d) => d,
+        None => return Ok(vec![]),
+    };
+    let mut out: Vec<String> = Vec::new();
+    collect_media(Path::new(&dir), &mut out);
+    out.sort();
+    Ok(out)
+}
+
+/// 递归遍历目录，收集所有媒体/图片文件。
+fn collect_media(dir: &Path, out: &mut Vec<String>) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_media(&path, out);
+        } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            if MEDIA_EXTS.iter().any(|x| x.eq_ignore_ascii_case(ext)) {
+                out.push(path.to_string_lossy().to_string());
+            }
+        }
+    }
 }
 
 #[derive(serde::Deserialize)]

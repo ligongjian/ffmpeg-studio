@@ -29,6 +29,7 @@ pub fn run() {
             ffmpeg::list_displays,
             ffmpeg::list_devices,
             ffmpeg::pick_record_dir,
+            ffmpeg::pick_folder_files,
             ffmpeg::start_record,
             ffmpeg::stop_record,
             ffmpeg::record_status,

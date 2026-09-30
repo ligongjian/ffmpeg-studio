@@ -315,6 +315,17 @@ export async function pickInput() {
   }
 }
 
+/** 选择文件夹并递归收集其中的媒体文件（用于批处理） */
+export async function pickFolderFiles(): Promise<string[]> {
+  try {
+    const list = await invoke<string[]>("pick_folder_files");
+    return list || [];
+  } catch (e) {
+    console.error(e);
+    return [];
+  }
+}
+
 export function setInputFile(path: string) {
   store.inputFile = path;
   store.inputInfo = null;
