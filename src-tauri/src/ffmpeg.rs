@@ -387,6 +387,191 @@ pub fn clear_task_log(state: State<FfmpegState>, id: String) {
     state.logs.lock().unwrap().remove(&id);
 }
 
+/// 探测媒体文件时长（秒）。剪辑页据此按**真实**总长绘制时间轴，
+/// 而不是用一个写死的假长度——否则拖到哪儿都是假的。
+#[tauri::command]
+pub fn probe_media_duration(state: State<FfmpegState>, path: String) -> Result<f64, String> {
+    probe_media_info_full(&path, &state.ffmpeg_path()).map(|i| i.duration)
+}
+
+/// 媒体文件信息：文件大小（字节）、时长（秒）、主视频流码率（bps，可选）。
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaInfo {
+    pub size: u64,
+    pub duration: f64,
+    pub video_bitrate: Option<u64>,
+    pub video_width: Option<u32>,
+    pub video_height: Option<u32>,
+}
+
+/// 把 ffmpeg 可执行文件路径里的"ffmpeg"改成"ffprobe"。
+/// 只替换**文件名**部分，避免把目录名里同样出现的 "ffmpeg"（如 ffmpeg_7.1_x64）也改掉。
+fn derive_ffprobe_path(ffmpeg_bin: &str) -> String {
+    let p = std::path::Path::new(ffmpeg_bin);
+    let file_name = p.file_name().and_then(|s| s.to_str()).unwrap_or("ffmpeg");
+    let probe_name = if file_name.eq_ignore_ascii_case("ffmpeg")
+        || file_name.eq_ignore_ascii_case("ffmpeg.exe")
+        || file_name.eq_ignore_ascii_case("ffmpeg.cmd")
+        || file_name.eq_ignore_ascii_case("ffmpeg.bat")
+    {
+        // 直接换文件名
+        if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
+            format!("ffprobe.{}", ext.to_ascii_lowercase())
+        } else {
+            "ffprobe".to_string()
+        }
+    } else {
+        // 兜底：把文件名前缀 ffmpeg → ffprobe
+        if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
+            let new_stem = stem.replacen("ffmpeg", "ffprobe", 1);
+            if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
+                format!("{}.{}", new_stem, ext.to_ascii_lowercase())
+            } else {
+                new_stem
+            }
+        } else {
+            "ffprobe".to_string()
+        }
+    };
+    match p.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => {
+            dir.join(probe_name).to_string_lossy().into_owned()
+        }
+        _ => probe_name, // 裸 "ffmpeg" / "ffmpeg.exe"（PATH 查找）
+    }
+}
+
+fn probe_media_info_full(path: &str, ffmpeg_bin: &str) -> Result<MediaInfo, String> {
+    if path.trim().is_empty() {
+        return Err("未指定文件".into());
+    }
+    // 文件大小走文件系统，最可靠；ffprobe 的 format=duration / format=bit_rate 也一并取
+    let size = std::fs::metadata(path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+
+    // 把 ffmpeg 可执行文件路径里的"ffmpeg"改成"ffprobe"——只换文件名，不动目录
+    // （不能简单 replacen，否则 "…\ffmpeg_7.1_x64\ffmpeg.exe" 会把目录里那个 ffmpeg 也改掉）
+    let ffprobe = derive_ffprobe_path(ffmpeg_bin);
+    let out = Command::new(&ffprobe)
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration,bit_rate",
+            "-show_entries",
+            "stream=index,codec_type,bit_rate,width,height",
+            "-of",
+            "json",
+            path,
+        ])
+        .output()
+        .map_err(|e| format!("无法执行 ffprobe：{e}"))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(format!(
+            "无法读取媒体信息：{path}（{}）",
+            err.trim().split('\n').next().unwrap_or("")
+        ));
+    }
+
+    // 不引入 serde_json 解析，逐行扫 JSON——简单且足够稳定。
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut duration = 0.0_f64;
+    let mut video_bitrate: Option<u64> = None;
+    let mut width: Option<u32> = None;
+    let mut height: Option<u32> = None;
+
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(v) = line.strip_prefix("\"duration\":") {
+            let num = v.trim().trim_end_matches(',').trim().trim_matches('"');
+            duration = num.parse::<f64>().unwrap_or(duration);
+        } else if let Some(v) = line.strip_prefix("\"bit_rate\":") {
+            let v = v.trim().trim_end_matches(',').trim_matches('"');
+            if v == "N/A" {
+                continue;
+            }
+            // 容器码率（format 段）；后续若遇到 stream 段的视频流码率会被覆盖
+            let _ = v.parse::<u64>();
+        } else if let Some(v) = line.strip_prefix("\"codec_type\":") {
+            let v = v.trim().trim_matches('"');
+            if v == "video" {
+                // 标记：下一行起的 width/height/bit_rate 都属于这条视频流
+                if video_bitrate.is_none() {
+                    video_bitrate = Some(0);
+                }
+            }
+        } else if let Some(v) = line.strip_prefix("\"width\":") {
+            width = v.trim().trim_end_matches(',').parse::<u32>().ok();
+        } else if let Some(v) = line.strip_prefix("\"height\":") {
+            height = v.trim().trim_end_matches(',').parse::<u32>().ok();
+        }
+    }
+
+    // 重新跑一遍，专门取 stream 段的视频 bit_rate（更准确）
+    let out2 = Command::new(&ffprobe)
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=bit_rate,avg_bit_rate,width,height",
+            "-of",
+            "json",
+            path,
+        ])
+        .output()
+        .ok();
+    if let Some(o) = out2 {
+        let t = String::from_utf8_lossy(&o.stdout);
+        for line in t.lines() {
+            let line = line.trim();
+            if let Some(v) = line.strip_prefix("\"bit_rate\":") {
+                let v = v.trim().trim_end_matches(',').trim_matches('"');
+                if v != "N/A" {
+                    if let Ok(n) = v.parse::<u64>() {
+                        video_bitrate = Some(n);
+                    }
+                }
+            } else if let Some(v) = line.strip_prefix("\"avg_bit_rate\":") {
+                let v = v.trim().trim_end_matches(',').trim_matches('"');
+                if v != "N/A" {
+                    if let Ok(n) = v.parse::<u64>() {
+                        video_bitrate = Some(n);
+                    }
+                }
+            } else if let Some(v) = line.strip_prefix("\"width\":") {
+                width = width.or_else(|| v.trim().trim_end_matches(',').parse::<u32>().ok());
+            } else if let Some(v) = line.strip_prefix("\"height\":") {
+                height = height.or_else(|| v.trim().trim_end_matches(',').parse::<u32>().ok());
+            }
+        }
+    }
+
+    // 仍拿不到时长时回退到单独 probe_duration
+    if duration <= 0.0 {
+        duration = probe_duration(path, &ffprobe).unwrap_or(0.0);
+    }
+
+    Ok(MediaInfo {
+        size,
+        duration,
+        video_bitrate,
+        video_width: width,
+        video_height: height,
+    })
+}
+
+/// 前端读取源文件的 size / duration / 主视频流码率等元信息，
+/// 用于压缩页的「预估输出」计算，避免显示写死的假数字。
+#[tauri::command]
+pub fn probe_media_info(state: State<FfmpegState>, path: String) -> Result<MediaInfo, String> {
+    probe_media_info_full(&path, &state.ffmpeg_path())
+}
+
 /// Spawn an ffmpeg process for `cmd`, stream progress to the frontend, support cancel.
 #[tauri::command]
 pub fn run_ffmpeg(
@@ -399,7 +584,7 @@ pub fn run_ffmpeg(
     let bin = state.ffmpeg_path();
     let overwrite = state.overwrite();
     let notify = state.notify_on_done();
-    let ffprobe = bin.replacen("ffmpeg", "ffprobe", 1);
+    let ffprobe = derive_ffprobe_path(&bin);
     let args = split_args(&cmd);
     if args.len() < 2 {
         return Err("命令无效：缺少参数".into());

@@ -26,10 +26,25 @@ export interface Recent {
   size: string;
 }
 
+/** 源文件元信息（由后端 probe_media_info 提供，用于压缩页预估输出） */
+export interface MediaInfo {
+  size: number;
+  duration: number;
+  videoBitrate: number | null;
+  videoWidth: number | null;
+  videoHeight: number | null;
+}
+
 export const store = reactive({
   tab: "dashboard",
   dark: false,
   inputFile: "",
+  /** 当前输入文件的元信息（size / duration / video_bitrate …），由 probeInput() 填充 */
+  inputInfo: null as MediaInfo | null,
+  /** 探测当前输入文件进行中 */
+  inputProbing: false,
+  /** 探测失败原因（成功或换文件时清空） */
+  inputProbeErr: "",
   recent: [] as Recent[],
   tasks: [] as Task[],
   // 引擎状态
@@ -150,6 +165,9 @@ export async function pickInput() {
 
 export function setInputFile(path: string) {
   store.inputFile = path;
+  store.inputInfo = null;
+  store.inputProbeErr = "";
+  store.inputProbing = true;
   const now = new Date();
   const time = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
     now.getDate()
@@ -161,6 +179,33 @@ export function setInputFile(path: string) {
   store.recent = store.recent.filter((r) => r.path !== path);
   store.recent.unshift({ name, path, time, size: "—" });
   if (store.recent.length > 8) store.recent.length = 8;
+  // 新文件选上后立即探测元信息（失败也不阻塞；UI 显示「读取中…」之类的占位）
+  probeInput().catch(() => {
+    /* 忽略：探测失败时 UI 自然回退到占位文案 */
+  });
+}
+
+/** 探测当前输入文件的元信息（size / duration / videoBitrate …）并写入 store.inputInfo */
+export async function probeInput(): Promise<MediaInfo | null> {
+  if (!store.inputFile) {
+    store.inputInfo = null;
+    store.inputProbing = false;
+    store.inputProbeErr = "";
+    return null;
+  }
+  store.inputProbing = true;
+  store.inputProbeErr = "";
+  try {
+    const info = await invoke<MediaInfo>("probe_media_info", { path: store.inputFile });
+    store.inputInfo = info;
+    return info;
+  } catch (e) {
+    store.inputInfo = null;
+    store.inputProbeErr = typeof e === "string" ? e : "无法读取媒体信息";
+    return null;
+  } finally {
+    store.inputProbing = false;
+  }
 }
 
 function newId() {

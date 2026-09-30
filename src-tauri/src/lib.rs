@@ -18,6 +18,8 @@ pub fn run() {
             ffmpeg::pick_file,
             ffmpeg::pick_files,
             ffmpeg::pick_executable,
+            ffmpeg::probe_media_duration,
+            ffmpeg::probe_media_info,
             ffmpeg::run_ffmpeg,
             ffmpeg::cancel_ffmpeg,
             ffmpeg::get_task_log,
