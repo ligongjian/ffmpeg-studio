@@ -4,10 +4,16 @@ import { store, pickInput, probeInput, saveSettings } from "../store";
 import { buildCompress } from "../lib/ffmpeg";
 import CommandCard from "../components/CommandCard.vue";
 import SegGroup from "../components/SegGroup.vue";
+import { baseName } from "../lib/format";
 
 // CRF 与「设置 → 默认输出 → 默认 CRF」共用同一个值
 const s = reactive({ preset: "medium", res: "", bitrate: "" });
 const inputName = computed(() => store.inputFile || "input.mp4");
+// 输出文件名：沿用源 basename 保持 .mp4；源本身已是 mp4 时追加 .compressed 防自覆盖
+const outputName = computed(() => {
+  const base = baseName(inputName.value).replace(/\.[^./\\]+$/, "") || "output";
+  return /\.mp4$/i.test(inputName.value) ? `${base}.compressed.mp4` : `${base}.mp4`;
+});
 const cmd = computed(() =>
   buildCompress({ input: inputName.value, crf: store.crf, preset: s.preset, res: s.res, bitrate: s.bitrate })
 );
@@ -166,6 +172,8 @@ function fmtDuration(s: number): string {
           <span class="text-brand text-xs cursor-pointer" @click="pickInput()">选择</span>
         </div>
       </div>
+
+      <div class="text-xs text-muted">输出文件：<span class="text-brand font-mono">{{ outputName }}</span></div>
 
       <div>
         <div class="flex justify-between text-sm mb-1">

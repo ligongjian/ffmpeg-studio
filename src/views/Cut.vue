@@ -3,7 +3,7 @@ import { reactive, ref, computed, watch, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { store, pickInput } from "../store";
 import { buildCut } from "../lib/ffmpeg";
-import { hms2s, s2hms } from "../lib/format";
+import { hms2s, s2hms, baseName } from "../lib/format";
 import CommandCard from "../components/CommandCard.vue";
 import SegGroup from "../components/SegGroup.vue";
 
@@ -92,6 +92,11 @@ const ticks = computed(() =>
 );
 
 const inputName = computed(() => store.inputFile || "input.mp4");
+// 输出文件名：沿用源 basename 保持 .mp4；源本身是 mp4 时追加 .clip 防自覆盖
+const outputName = computed(() => {
+  const base = baseName(inputName.value).replace(/\.[^./\\]+$/, "") || "output";
+  return /\.mp4$/i.test(inputName.value) ? `${base}.clip.mp4` : `${base}.mp4`;
+});
 const cmd = computed(() =>
   buildCut({
     input: inputName.value,
@@ -234,6 +239,8 @@ function normalize() {
           <span class="text-brand text-xs cursor-pointer" @click="pickInput()">选择</span>
         </div>
       </div>
+
+      <div class="text-xs text-muted">输出文件：<span class="text-brand font-mono">{{ outputName }}</span></div>
 
       <div class="flex items-center justify-between">
         <h3 class="font-semibold">时间轴剪辑</h3>

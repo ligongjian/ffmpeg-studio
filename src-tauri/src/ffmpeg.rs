@@ -442,32 +442,81 @@ fn derive_ffprobe_path(ffmpeg_bin: &str) -> String {
     }
 }
 
+/// 单次命令带超时执行。`Command::output()` 没有超时机制，
+/// 遇到损坏/巨大文件可能让 ffprobe 永远挂住；超时后杀掉子进程返回 Err。
+/// 用 channel 让 wait 线程通知主线程，避免阻塞调用方。
+fn run_with_timeout(cmd: &mut Command, timeout: std::time::Duration) -> Result<std::process::Output, String> {
+    use std::time::Instant;
+
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+    let mut child = cmd.spawn().map_err(|e| format!("启动失败：{e}"))?;
+
+    // 子线程读 stdout，主线程读 stderr（或反之），避免管道填满后子进程死锁。
+    let stdout_handle = child.stdout.take();
+    let stderr_handle = child.stderr.take();
+
+    let stdout_thread = stdout_handle.map(|mut h| std::thread::spawn(move || {
+        let mut buf = String::new();
+        let _ = BufReader::new(&mut h).read_to_string(&mut buf);
+        buf
+    }));
+    let stderr_thread = stderr_handle.map(|mut h| std::thread::spawn(move || {
+        let mut buf = String::new();
+        let _ = BufReader::new(&mut h).read_to_string(&mut buf);
+        buf
+    }));
+
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => break,
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!("命令超时（{}s）", timeout.as_secs()));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(e) => return Err(format!("等待子进程失败：{e}")),
+        }
+    }
+    let status = child.wait().map_err(|e| format!("读取退出码失败：{e}"))?;
+
+    let stdout = stdout_thread
+        .and_then(|t| t.join().ok())
+        .unwrap_or_default();
+    let stderr = stderr_thread
+        .and_then(|t| t.join().ok())
+        .unwrap_or_default();
+
+    Ok(std::process::Output {
+        status,
+        stdout: stdout.into_bytes(),
+        stderr: stderr.into_bytes(),
+    })
+}
+
 fn probe_media_info_full(path: &str, ffmpeg_bin: &str) -> Result<MediaInfo, String> {
     if path.trim().is_empty() {
         return Err("未指定文件".into());
     }
-    // 文件大小走文件系统，最可靠；ffprobe 的 format=duration / format=bit_rate 也一并取
-    let size = std::fs::metadata(path)
-        .map(|m| m.len())
-        .unwrap_or(0);
+    // 文件大小走文件系统，最可靠
+    let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
 
-    // 把 ffmpeg 可执行文件路径里的"ffmpeg"改成"ffprobe"——只换文件名，不动目录
-    // （不能简单 replacen，否则 "…\ffmpeg_7.1_x64\ffmpeg.exe" 会把目录里那个 ffmpeg 也改掉）
     let ffprobe = derive_ffprobe_path(ffmpeg_bin);
-    let out = Command::new(&ffprobe)
-        .args([
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration,bit_rate",
-            "-show_entries",
-            "stream=index,codec_type,bit_rate,width,height",
-            "-of",
-            "json",
-            path,
-        ])
-        .output()
-        .map_err(|e| format!("无法执行 ffprobe：{e}"))?;
+    // 单次探测：format + stream 一次拿全，再不必跑两三次。
+    let mut cmd = Command::new(&ffprobe);
+    cmd.args([
+        "-v", "error",
+        "-show_entries", "format=duration",
+        "-show_entries", "stream=index,codec_type,bit_rate,avg_bit_rate,width,height",
+        "-of", "json",
+        path,
+    ]);
+    let out = run_with_timeout(&mut cmd, std::time::Duration::from_secs(15))
+        .map_err(|e| format!("无法读取媒体信息：{path}（{e}）"))?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         return Err(format!(
@@ -477,58 +526,27 @@ fn probe_media_info_full(path: &str, ffmpeg_bin: &str) -> Result<MediaInfo, Stri
     }
 
     // 不引入 serde_json 解析，逐行扫 JSON——简单且足够稳定。
+    // format 段先于 stream 段出现；用 in_stream 标记，遇到 codec_type 切换流。
     let text = String::from_utf8_lossy(&out.stdout);
     let mut duration = 0.0_f64;
     let mut video_bitrate: Option<u64> = None;
     let mut width: Option<u32> = None;
     let mut height: Option<u32> = None;
+    // 当前所在的 stream 是否为视频（遇到下一行 codec_type 才确定，先用待定标记）
+    let mut pending_codec: Option<bool> = None;
+    let mut current_is_video = false;
 
     for line in text.lines() {
         let line = line.trim();
         if let Some(v) = line.strip_prefix("\"duration\":") {
             let num = v.trim().trim_end_matches(',').trim().trim_matches('"');
             duration = num.parse::<f64>().unwrap_or(duration);
-        } else if let Some(v) = line.strip_prefix("\"bit_rate\":") {
-            let v = v.trim().trim_end_matches(',').trim_matches('"');
-            if v == "N/A" {
-                continue;
-            }
-            // 容器码率（format 段）；后续若遇到 stream 段的视频流码率会被覆盖
-            let _ = v.parse::<u64>();
         } else if let Some(v) = line.strip_prefix("\"codec_type\":") {
-            let v = v.trim().trim_matches('"');
-            if v == "video" {
-                // 标记：下一行起的 width/height/bit_rate 都属于这条视频流
-                if video_bitrate.is_none() {
-                    video_bitrate = Some(0);
-                }
-            }
-        } else if let Some(v) = line.strip_prefix("\"width\":") {
-            width = v.trim().trim_end_matches(',').parse::<u32>().ok();
-        } else if let Some(v) = line.strip_prefix("\"height\":") {
-            height = v.trim().trim_end_matches(',').parse::<u32>().ok();
-        }
-    }
-
-    // 重新跑一遍，专门取 stream 段的视频 bit_rate（更准确）
-    let out2 = Command::new(&ffprobe)
-        .args([
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=bit_rate,avg_bit_rate,width,height",
-            "-of",
-            "json",
-            path,
-        ])
-        .output()
-        .ok();
-    if let Some(o) = out2 {
-        let t = String::from_utf8_lossy(&o.stdout);
-        for line in t.lines() {
-            let line = line.trim();
+            // codec_type 出现在同一 stream 块的开头，先记下，等本块字段读完后才切换
+            pending_codec = Some(v.trim().trim_matches('"') == "video");
+            current_is_video = false;
+        } else if current_is_video || pending_codec == Some(true) {
+            // 只有视频流字段才计入
             if let Some(v) = line.strip_prefix("\"bit_rate\":") {
                 let v = v.trim().trim_end_matches(',').trim_matches('"');
                 if v != "N/A" {
@@ -549,11 +567,12 @@ fn probe_media_info_full(path: &str, ffmpeg_bin: &str) -> Result<MediaInfo, Stri
                 height = height.or_else(|| v.trim().trim_end_matches(',').parse::<u32>().ok());
             }
         }
-    }
-
-    // 仍拿不到时长时回退到单独 probe_duration
-    if duration <= 0.0 {
-        duration = probe_duration(path, &ffprobe).unwrap_or(0.0);
+        // 一行字段读完后才把 pending_codec 固化，保证 block 边界正确
+        if line.ends_with('{') || line.ends_with('}') {
+            if let Some(v) = pending_codec.take() {
+                current_is_video = v;
+            }
+        }
     }
 
     Ok(MediaInfo {
@@ -570,6 +589,32 @@ fn probe_media_info_full(path: &str, ffmpeg_bin: &str) -> Result<MediaInfo, Stri
 #[tauri::command]
 pub fn probe_media_info(state: State<FfmpegState>, path: String) -> Result<MediaInfo, String> {
     probe_media_info_full(&path, &state.ffmpeg_path())
+}
+
+/// 为 concat 模式写一份 `merge_list.txt` 到指定目录，文件内容形如：
+///   file 'C:\...\a.mp4'
+///   file 'C:\...\b.mp4'
+/// 之所以写绝对路径并加单引号：concat demuxer 默认拒绝绝对路径，命令里 `-safe 0` 才允许，
+/// 但路径里出现单引号仍需转义成 `'\''`（shell 风格），否则 ffmpeg 解析失败。
+#[tauri::command]
+pub fn write_concat_list(dir: String, files: Vec<String>) -> Result<String, String> {
+    if files.is_empty() {
+        return Err("文件列表为空".into());
+    }
+    let dir_path = PathBuf::from(&dir);
+    if !dir_path.as_os_str().is_empty() {
+        std::fs::create_dir_all(&dir_path)
+            .map_err(|e| format!("无法创建目录 {}: {}", dir, e))?;
+    }
+    let list_path = dir_path.join("merge_list.txt");
+    let mut body = String::new();
+    for f in &files {
+        let esc = f.replace('\\', "/").replace('\'', "'\\''");
+        body.push_str(&format!("file '{}'\n", esc));
+    }
+    std::fs::write(&list_path, body)
+        .map_err(|e| format!("写入 {} 失败: {}", list_path.display(), e))?;
+    Ok(list_path.to_string_lossy().into_owned())
 }
 
 /// Spawn an ffmpeg process for `cmd`, stream progress to the frontend, support cancel.

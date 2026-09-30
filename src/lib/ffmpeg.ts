@@ -25,6 +25,22 @@ function q(p: string): string {
   return `"${p}"`;
 }
 
+/**
+ * 输出文件名的命令字符串：含空格/引号时加双引号，否则原样。
+ *
+ * 后端 `split_args` 只把 `"` 当开关，不识别 `\"`；因此出现 `"` 时用
+ * shell 风格的 `'` 拼接（后端与 ffmpeg CLI 都认），普通空格则用双引号即可。
+ * 复制到 PowerShell/CMD 也照常运行。
+ */
+function outArg(name: string): string {
+  if (!/[ "'\\]/.test(name)) return name;
+  if (name.includes('"')) {
+    const esc = name.replace(/'/g, "'\\''").replace(/"/g, "'\\\"'");
+    return `'${esc}'`;
+  }
+  return `"${name}"`;
+}
+
 /** 可选输出容器（格式转换页与设置里的「默认容器」共用同一份清单） */
 export const FMT_OPTIONS: { value: string; label: string }[] = [
   { value: "mp4", label: "MP4 (H.264)" },
@@ -99,7 +115,12 @@ export function buildConvert(o: ConvertOpts): string {
 
   if (o.faststart && supportsFaststart(o.fmt)) parts.push("-movflags +faststart");
   if (o.norm && !isVideoOnly(o.fmt)) parts.push("-af loudnorm");
-  parts.push(`output.${o.fmt}`);
+
+  // 输出文件名沿用源文件的 basename（不同扩展名），覆盖更直观；
+  // 源与目标同名（无扩展名）时追加 `.converted` 避免自覆盖。
+  const base = baseName(o.input).replace(/\.[^./\\]+$/, "") || "output";
+  const outName = base === o.fmt.toLowerCase() ? `${base}.converted.${o.fmt}` : `${base}.${o.fmt}`;
+  parts.push(outArg(outName));
   return ffmpegCmd(parts.join(" "));
 }
 
@@ -115,7 +136,10 @@ export function buildCompress(o: CompressOpts): string {
   const parts = [`-i ${q(o.input)}`, `-c:v libx265 -crf ${o.crf} -preset ${o.preset}`];
   if (o.res) parts.push(`-vf scale=${o.res}`);
   if (o.bitrate) parts.push(`-b:v ${o.bitrate}`);
-  parts.push("-c:a aac -b:a 128k output.mp4");
+  // 输出文件名沿用源 basename，保持 .mp4 后缀；源本身已是 mp4 时加 .compressed 避免自覆盖
+  const base = baseName(o.input).replace(/\.[^./\\]+$/, "") || "output";
+  const ext = /\.mp4$/i.test(o.input) ? "compressed" : "";
+  parts.push("-c:a aac -b:a 128k", outArg(`${base}${ext ? "." + ext : ""}.mp4`));
   return ffmpegCmd(parts.join(" "));
 }
 
@@ -128,28 +152,68 @@ export interface CutOpts {
 
 export function buildCut(o: CutOpts): string {
   const parts = [`-ss ${o.start} -to ${o.end} -i ${q(o.input)}`];
+  // 输出文件名沿用源 basename 保持 .mp4；源本身是 mp4 时加 .clip 防自覆盖
+  const base = baseName(o.input).replace(/\.[^./\\]+$/, "") || "output";
+  const outName = /\.mp4$/i.test(o.input) ? `${base}.clip.mp4` : `${base}.mp4`;
   parts.push(
-    o.mode === "copy" ? "-c copy output.mp4" : "-c:v libx264 -crf 23 -c:a aac output.mp4"
+    o.mode === "copy"
+      ? `-c copy ${outArg(outName)}`
+      : `-c:v libx264 -crf 23 -c:a aac ${outArg(outName)}`
   );
   return ffmpegCmd(parts.join(" "));
 }
 
 export interface MergeOpts {
   mode: "concat" | "filter";
+  /** 文件绝对路径列表（顺序即合并顺序） */
   files: string[];
+  /** 输出容器；filter 模式会影响扩展名，concat 模式仅用于命名 */
+  fmt: string;
+}
+
+/** concat demuxer 读取的 list.txt 文件名（后端 write_concat_list 写到该名字） */
+export const CONCAT_LIST_NAME = "merge_list.txt";
+
+/** 把路径里的反斜杠换成正斜杠，避开 concat demuxer 把 `\` 当转义符的坑 */
+function toConcatPath(p: string): string {
+  return p.replace(/\\/g, "/");
+}
+
+/** 把路径放进 concat list.txt 的 file 指令：先转 /，再转义单引号（shell 风格） */
+function toConcatLine(p: string): string {
+  return `file '${toConcatPath(p).replace(/'/g, "'\\''")}'`;
 }
 
 export function buildMerge(o: MergeOpts): string {
-  const list = o.files.length ? o.files : ["a.mp4", "b.mp4"];
+  const list = o.files.length ? o.files : [];
+  const fmt = o.fmt || "mp4";
+  // 输出文件名沿用首个源文件的 basename，加 `.merged` 后缀避免与任何源同名。
+  // 无源文件（占位预览）时退化为 `merged.${fmt}`。
+  const base = list.length
+    ? baseName(list[0]).replace(/\.[^./\\]+$/, "") || "merged"
+    : "merged";
+  const out = outArg(`${base}.merged.${fmt}`);
   if (o.mode === "concat") {
-    // concat 走 list.txt，顺序即 list.txt 中条目顺序（见页面下方预览）
-    return ffmpegCmd(`-f concat -safe 0 -i list.txt -c copy merged.mp4`);
+    // 走 list.txt；-safe 0 才允许绝对路径
+    return ffmpegCmd(`-f concat -safe 0 -i ${CONCAT_LIST_NAME} -c copy ${out}`);
+  }
+  if (!list.length) {
+    // 没文件时给个能跑的占位（两个示例源），便于用户复制命令参考
+    const inputs = `-i input1.mp4 -i input2.mp4`;
+    return ffmpegCmd(
+      `${inputs} -filter_complex "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[v][a]" -map "[v]" -map "[a]" -c:v libx264 -crf 23 -c:a aac ${out}`
+    );
   }
   const inputs = list.map((f) => `-i ${q(f)}`).join(" ");
   const streams = list.map((_, i) => `[${i}:v][${i}:a]`).join("");
   return ffmpegCmd(
-    `${inputs} -filter_complex "${streams}concat=n=${list.length}:v=1:a=1[v][a]" -map "[v]" -map "[a]" merged.mp4`
+    `${inputs} -filter_complex "${streams}concat=n=${list.length}:v=1:a=1[v][a]" -map "[v]" -map "[a]" -c:v libx264 -crf 23 -c:a aac ${out}`
   );
+}
+
+/** 生成 concat list.txt 的完整内容，供页面预览 */
+export function buildConcatList(files: string[]): string {
+  return files.map(toConcatLine).join("\n");
 }
 
 export interface ExtractOpts {

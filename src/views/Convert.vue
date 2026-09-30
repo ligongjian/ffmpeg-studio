@@ -9,6 +9,7 @@ import {
   AUDIO_ONLY_FMT,
   FMT_OPTIONS,
 } from "../lib/ffmpeg";
+import { baseName } from "../lib/format";
 import CommandCard from "../components/CommandCard.vue";
 import SegGroup from "../components/SegGroup.vue";
 
@@ -48,6 +49,12 @@ watch(
 );
 
 const inputName = computed(() => store.inputFile || "input.mov");
+// 输出文件名：沿用源文件 basename，后缀换成目标容器；同名时追加 .converted
+const outputName = computed(() => {
+  const base = baseName(inputName.value).replace(/\.[^./\\]+$/, "") || "output";
+  const fmt = store.fmt.toLowerCase();
+  return base === fmt ? `${base}.converted.${store.fmt}` : `${base}.${store.fmt}`;
+});
 const cmd = computed(() =>
   buildConvert({
     input: inputName.value,
@@ -75,6 +82,8 @@ const cmd = computed(() =>
           <span class="text-brand text-xs cursor-pointer" @click="pickInput()">选择</span>
         </div>
       </div>
+
+      <div class="text-xs text-muted">输出文件：<span class="text-brand font-mono">{{ outputName }}</span></div>
 
       <div class="grid md:grid-cols-2 gap-4">
         <div>

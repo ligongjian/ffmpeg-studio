@@ -57,11 +57,13 @@ function run() {
     <pre
       class="cmd bg-ink/70 rounded-xl p-3 text-brand whitespace-pre-wrap break-all"
     >{{ shown }}</pre>
-    <button
-      class="mt-3 w-full py-2.5 rounded-lg bg-brand text-white font-bold hover:bg-brandd transition-colors cursor-pointer"
-      @click="run"
-    >
-      加入队列并运行
-    </button>
+    <slot name="actions">
+      <button
+        class="mt-3 w-full py-2.5 rounded-lg bg-brand text-white font-bold hover:bg-brandd transition-colors cursor-pointer"
+        @click="run"
+      >
+        加入队列并运行
+      </button>
+    </slot>
   </div>
 </template>
