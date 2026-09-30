@@ -941,6 +941,12 @@ export interface AudioOpts {
   silenceRemove: boolean;
   /** 声道：0=保持，1=单声道，2=立体声 */
   channels: number;
+  /** 总时长（秒）；仅用于计算淡出起点。0 = 未知（淡出退化为从 0 开始，选好文件探测后自动修正） */
+  duration: number;
+  /** WAV 位深：16 / 24 / 32（32=32bit 浮点）；仅 outFmt=wav 时生效，其它容器忽略 */
+  wavDepth: number;
+  /** 自定义音频滤镜链（高级），追加到 -af 末尾 */
+  customAf: string;
 }
 
 /**
@@ -974,11 +980,25 @@ function audioQualityArgs(fmt: string, q: string): string[] {
   }
 }
 
-/** 通用 af 片段：淡入/淡出/音量/响度/去静音，按推荐顺序排列 */
+/** 按容器选择音频编码器；WAV 额外按位深在 PCM 变体间切换 */
+function audioEnc(fmt: string, wavDepth: number): string {
+  if (fmt !== "wav") return AUDIO_ONLY_FMT[fmt] || "aac";
+  if (wavDepth >= 32) return "pcm_f32le";
+  if (wavDepth >= 24) return "pcm_s24le";
+  return "pcm_s16le";
+}
+
+/** 通用 af 片段：淡入/淡出/音量/响度/去静音/自定义，按推荐顺序排列 */
 function buildAudioFilters(o: AudioOpts): string[] {
   const af: string[] = [];
   if (o.fadeIn > 0) af.push(`afade=t=in:st=0:d=${o.fadeIn}`);
-  if (o.fadeOut > 0) af.push(`afade=t=out:d=${o.fadeOut}`);
+  if (o.fadeOut > 0) {
+    // 淡出必须在结尾前开始：st = 总时长 - 淡出时长。不给 st 时 ffmpeg 默认从 0 秒
+    // 开始淡出，等于把开头几秒直接静音（实测哑失败）。总时长未知（尚未探测）时
+    // 退化为 st=0，选好文件并探测出时长后会自动修正为正确起点。
+    const st = o.duration > 0 ? Math.max(0, o.duration - o.fadeOut).toFixed(3) : 0;
+    af.push(`afade=t=out:st=${st}:d=${o.fadeOut}`);
+  }
   if (o.volumeGain !== 0) af.push(`volume=${o.volumeGain}dB`);
   if (o.normalize) af.push(`loudnorm=I=${o.loudnormI}`);
   if (o.silenceRemove) {
@@ -987,12 +1007,14 @@ function buildAudioFilters(o: AudioOpts): string[] {
       "silenceremove=start_periods=1:start_duration=0:start_threshold=-50dB:detection=peak,aformat=dblp,areverse,silenceremove=start_periods=1:start_duration=0:start_threshold=-50dB:detection=peak,aformat=dblp,areverse"
     );
   }
+  const cf = (o.customAf || "").trim();
+  if (cf) af.push(cf);
   return af;
 }
 
 export function buildAudio(o: AudioOpts): string {
   const fmt = o.outFmt || "mp3";
-  const enc = AUDIO_ONLY_FMT[fmt] || "aac";
+  const enc = audioEnc(fmt, o.wavDepth);
   const qualityArgs = audioQualityArgs(fmt, o.quality || "standard");
   const sampleArgs = o.sampleRate > 0 ? [`-ar ${o.sampleRate}`] : [];
 
