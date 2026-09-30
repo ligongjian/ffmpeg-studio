@@ -25,6 +25,13 @@ pub fn run() {
             ffmpeg::cancel_ffmpeg,
             ffmpeg::get_task_log,
             ffmpeg::clear_task_log,
+            // 录制采集（独立会话，不走任务队列）
+            ffmpeg::list_displays,
+            ffmpeg::list_devices,
+            ffmpeg::pick_record_dir,
+            ffmpeg::start_record,
+            ffmpeg::stop_record,
+            ffmpeg::record_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ffmpeg-studio");

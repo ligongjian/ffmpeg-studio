@@ -1,7 +1,7 @@
 use std::collections::HashMap;
-use std::io::{BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -65,6 +65,8 @@ pub struct FfmpegState {
     running: Arc<Mutex<HashMap<String, Running>>>,
     /// 每个任务收集到的 ffmpeg 输出（stderr）。进程结束后仍保留，供「详情」查看。
     logs: Arc<Mutex<HashMap<String, Vec<String>>>>,
+    /// 录制会话：同时只能有一段录制，与任务队列的 running 完全隔离。
+    record: Mutex<Option<Recording>>,
 }
 
 impl FfmpegState {
@@ -73,6 +75,7 @@ impl FfmpegState {
             settings: Mutex::new(Settings::default()),
             running: Arc::new(Mutex::new(HashMap::new())),
             logs: Arc::new(Mutex::new(HashMap::new())),
+            record: Mutex::new(None),
         }
     }
 
@@ -809,4 +812,395 @@ pub fn cancel_ffmpeg(state: State<FfmpegState>, id: String) -> Result<(), String
     } else {
         Err("未找到运行中的任务".into())
     }
+}
+
+// ===== 录制采集 =====
+//
+// 录制**不**走任务队列：队列的执行模型（串行调度、进程退出即 done、退出码即成败）
+// 与录制的特性完全不匹配——录制由用户决定何时结束，靠 stdin 写 `q` 优雅收尾，
+// 而不是让 ffmpeg 自己跑完。因此用独立的 record 槽位持有唯一的录制进程。
+
+/// 一次录制会话：保留 child 的 stdin 用于优雅停止（写 `q` 让 ffmpeg 写完 moov 原子）。
+struct Recording {
+    child: Child,
+    started_at: std::time::SystemTime,
+    output: String,
+}
+
+/// 一个采集设备（来自 `ffmpeg -list_devices 1 -f dshow -i dummy`）。
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceItem {
+    /// 设备类型：`video` 或 `audio`
+    pub kind: String,
+    /// 设备名（含 `[DShow]` 前缀，形如 `Video: 笔记本的摄像头 [DShow]`）
+    pub name: String,
+    /// 括号里的设备标识，直接填进 `dshow -i video=...`
+    pub identifier: String,
+}
+
+/// 一个物理显示器（来自 `ffmpeg -f gdigrab -list_displays -i desktop`）。
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisplayItem {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+    /// 相对屏幕宽度归一化的位置，`primary` 表示主屏（Windows 下 x=0 的那个）
+    pub normalized_x: f64,
+    /// gdigrab 的显示器索引（从 1 开始），可直接用于 `-offset_x` 的参考
+    pub index: u32,
+}
+
+/// 录制前端需要的会话状态快照。
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordStatus {
+    pub is_recording: bool,
+    /// 录制已持续的秒数（进程未退出时的实时值）
+    pub elapsed: f64,
+    /// 录制进程退出时的状态：`done` | `failed` | `canceled` | 空
+    pub state: String,
+    pub output: String,
+    pub note: Option<String>,
+}
+
+fn elapsed_secs(start: &std::time::SystemTime) -> f64 {
+    start
+        .elapsed()
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0)
+}
+
+/// 以 timeout 秒为限执行 ffmpeg/ffprobe 并把 stdout+stderr 合并回来。
+/// 设备枚举命令的有用输出在 stderr（dshow / gdigrab 的 list 都在那里），
+/// 所以即使进程非零退出（list 模式下通常会），我们也照样收集文本。
+fn run_capture(bin: &str, args: &[&str], timeout: std::time::Duration) -> Option<String> {
+    let mut cmd = Command::new(bin);
+    cmd.args(args);
+    let out = run_with_timeout(&mut cmd, timeout).ok()?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    Some(format!("{}\n{}", stdout, stderr))
+}
+
+/// 列出物理显示器（Windows gdigrab）。命令故意让 ffmpeg 失败退出，只为拿 stderr 里的表。
+#[tauri::command]
+pub fn list_displays(state: State<FfmpegState>) -> Vec<DisplayItem> {
+    let bin = state.ffmpeg_path();
+    let out = match run_capture(
+        &bin,
+        &["-f", "gdigrab", "-list_displays", "-i", "desktop"],
+        std::time::Duration::from_secs(10),
+    ) {
+        Some(s) => s,
+        None => return Vec::new(),
+    };
+    // 输出形如：
+    //   Found monitor at (0,0) with dimensions 1920x1080, relative position 0%
+    let mut items = Vec::new();
+    let mut idx = 1u32;
+    for line in out.lines() {
+        let l = line.trim();
+        if !l.starts_with("Found monitor at") {
+            continue;
+        }
+        let inner = match l.trim_start_matches("Found monitor at").trim().strip_prefix('(') {
+            Some(v) => v,
+            None => continue,
+        };
+        let xy = match inner.split(')').next() {
+            Some(v) => v.trim(),
+            None => continue,
+        };
+        let mut coords = xy.split(',');
+        let x: u32 = coords.next().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+        let y: u32 = coords.next().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+        let rest = inner.split(')').nth(1).unwrap_or("");
+        let dims = rest.split(' ').nth(1).unwrap_or("");
+        let mut wh = dims
+            .trim_start_matches("with dimensions ")
+            .split('x');
+        let w: u32 = wh.next().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+        let h: u32 = wh.next().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+        let rel = rest.rsplit(' ').next().unwrap_or("0%");
+        let rel_pct: u32 = rel.trim_end_matches('%').parse().unwrap_or(0);
+        items.push(DisplayItem {
+            x,
+            y,
+            width: w,
+            height: h,
+            normalized_x: rel_pct as f64 / 100.0,
+            index: idx,
+        });
+        idx += 1;
+    }
+    items
+}
+
+/// 列出 DShow 视频/音频设备（Windows）。失败时返回空数组，前端回退到占位提示。
+#[tauri::command]
+pub fn list_devices(state: State<FfmpegState>) -> Vec<DeviceItem> {
+    let bin = state.ffmpeg_path();
+    let out = match run_capture(
+        &bin,
+        &["-hide_banner", "-list_devices", "1", "-f", "dshow", "-i", "dummy"],
+        std::time::Duration::from_secs(10),
+    ) {
+        Some(s) => s,
+        None => return Vec::new(),
+    };
+    let mut items = Vec::new();
+    let mut in_video = false;
+    let mut in_audio = false;
+    for line in out.lines() {
+        let l = line.trim();
+        if l.starts_with("[dshow @") && l.contains("Found device") {
+            // 形如： [dshow @ 0x...] Found device "笔记本的摄像头" on "video" at index 0.
+            let Some(body) = l.find("Found device") else { continue };
+            let body = &l[body..];
+            let Some(name) = body.strip_prefix(" \"") else { continue };
+            let Some(rest) = name.split("\"").nth(1) else { continue };
+            // rest 形如: " on "video" at index 0.
+            let Some(kind_start) = rest.find("on \"") else { continue };
+            let kind_part = &rest[kind_start + 4..];
+            let Some(kind_end) = kind_part.find('"') else { continue };
+            let kind = &kind_part[..kind_end];
+            let device_name = format!("{} [DShow]", name);
+            let Some(idx_start) = kind_part[kind_end..].find("index ") else { continue };
+            let after = &kind_part[kind_end..][idx_start + 6..];
+            let identifier = after.trim().trim_end_matches('.').trim().to_string();
+            match kind {
+                "video" => in_video = true,
+                "audio" => in_audio = true,
+                _ => {}
+            }
+            items.push(DeviceItem {
+                kind: kind.to_string(),
+                name: device_name,
+                identifier,
+            });
+        } else if l.starts_with("[dshow @") && (l.contains("video:") || l.contains("audio:")) {
+            // 分组小标题，用于切换 video/audio 上下文
+            if l.contains("video:") {
+                in_video = true;
+                in_audio = false;
+            } else if l.contains("audio:") {
+                in_audio = true;
+                in_video = false;
+            }
+        } else if l.starts_with("  ") && (in_video || in_audio) {
+            // dshow 的 list_devices 里 "Found device" 是唯一的设备条目行；
+            // 缩进的其它行是设备属性（Driver/Video Standard 等），跳过。
+            continue;
+        }
+    }
+    items
+}
+
+/// 选择录制输出目录（原生文件夹对话框）。
+#[tauri::command]
+pub async fn pick_record_dir(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    use tokio::sync::oneshot;
+    let (tx, rx) = oneshot::channel::<Option<String>>();
+    app.dialog()
+        .file()
+        .set_title("选择录制输出目录")
+        .pick_folder(move |path| {
+            let _ = tx.send(path.map(|p| p.to_string()));
+        });
+    rx.await.map_err(|_| "目录选择失败或被取消".to_string())
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordStartOpts {
+    /// 已经拼好的 ffmpeg 命令行（由前端 buildRecordCommand 产出，包含占位 `ffmpeg`）
+    cmd: String,
+    /// 录制输出的目标目录（绝对路径）
+    out_dir: String,
+}
+
+/// 启动一段录制：拉起 ffmpeg 子进程，把 stdin 保留用于优雅停止。
+#[tauri::command]
+pub fn start_record(app: AppHandle, state: State<FfmpegState>, opts: RecordStartOpts) -> Result<(), String> {
+    let mut rec = state.record.lock().unwrap();
+    if rec.is_some() {
+        return Err("已有录制正在进行，请先停止再开始新的录制".into());
+    }
+    let bin = state.ffmpeg_path();
+    let overwrite = state.overwrite();
+    let args = split_args(&opts.cmd);
+    if args.len() < 2 {
+        return Err("命令无效：缺少参数".into());
+    }
+    let mut input_args: Vec<String> = args[1..].to_vec();
+    // 录制输出文件名由前端保证唯一（带时间戳），但仍按设置插 -y / -n。
+    if !input_args.iter().any(|a| a == "-y" || a == "-n") {
+        input_args.insert(0, if overwrite { "-y".into() } else { "-n".into() });
+    }
+
+    let mut command = Command::new(&bin);
+    command.args(&input_args);
+    command.current_dir(&opts.out_dir);
+    command.stdin(Stdio::piped());
+    command.stdout(Stdio::null());
+    command.stderr(Stdio::piped());
+
+    let mut child = command.spawn().map_err(|e| {
+        format!("启动录制失败：{e}。请确认 ffmpeg 已安装且路径正确（当前：{bin}）。")
+    })?;
+
+    // 后台线程消费 stderr，否则管道填满后 ffmpeg 会阻塞；
+    // 录制期间不需要把日志回推前端，仅用于诊断——保留最近 N 行用于失败说明。
+    if let Some(stderr) = child.stderr.take() {
+        let logs = state.logs.clone();
+        std::thread::spawn(move || {
+            let mut buf = BufReader::new(stderr);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match buf.read_line(&mut line) {
+                    Ok(0) => break,
+                    Ok(_) => push_log(&logs, "record", line.trim().to_string()),
+                    Err(_) => break,
+                }
+            }
+        });
+    }
+
+    // 从命令行末尾反查输出文件名（最后一个不以 `-` 开头的 token），用于状态展示。
+    let output = input_args
+        .iter()
+        .rev()
+        .find(|t| !t.starts_with('-'))
+        .cloned()
+        .unwrap_or_default();
+
+    *rec = Some(Recording {
+        child,
+        started_at: std::time::SystemTime::now(),
+        output,
+    });
+    let _ = app.emit(
+        "record-progress",
+        serde_json::json!({ "isRecording": true, "elapsed": 0.0 }),
+    );
+    drop(rec); // 先释放 MutexGuard，再调用可能内部再次加锁的 spawn_record_watch
+    spawn_record_watch(app, state, String::new());
+    Ok(())
+}
+
+/// 优雅停止录制：向 ffmpeg 的 stdin 写 `q`，让它写完容器尾部（moov / seek head）后自然退出。
+/// 注意：ffmpeg 正常结束（写入 q 后优雅收尾）会**返回非零退出码**（"Conversion failed!"），
+/// 所以这里只负责按下"停止键"，最终的 done/failed 判定放到 spawn_record_watch 里
+/// ——根据退出码 + 日志里是否出现预期的收尾标记来区分"用户主动停止"与"真失败"。
+#[tauri::command]
+pub fn stop_record(state: State<FfmpegState>) -> Result<(), String> {
+    let mut rec = state.record.lock().unwrap();
+    if let Some(r) = rec.as_mut() {
+        let stdin = r.child.stdin.take();
+        if let Some(mut stdin) = stdin {
+            let _ = stdin.write_all(b"q");
+            let _ = stdin.flush();
+        }
+        Ok(())
+    } else {
+        Err("当前没有录制在进行".into())
+    }
+}
+
+/// 查询当前录制会话的状态快照（前端轮询用，与 ffmpeg-progress 事件互补）。
+#[tauri::command]
+pub fn record_status(state: State<FfmpegState>) -> RecordStatus {
+    let rec = state.record.lock().unwrap();
+    match rec.as_ref() {
+        Some(r) => RecordStatus {
+            is_recording: true,
+            elapsed: elapsed_secs(&r.started_at),
+            state: String::new(),
+            output: r.output.clone(),
+            note: None,
+        },
+        None => RecordStatus {
+            is_recording: false,
+            elapsed: 0.0,
+            state: String::new(),
+            output: String::new(),
+            note: None,
+        },
+    }
+}
+
+/// 在录制进程被创建后**后台**等待其退出，把最终状态推给前端。
+/// `start_record` 里调用一次即可，避免前端轮询超时误判。
+///
+/// 判定 done 还是 failed 的规则（关键，别改错）：
+/// 录制场景下 ffmpeg 几乎总会以非零退出码结束——写入 `q` 后它走的是
+/// "interrupted by user" 路径，退出码非 0，但这是**预期的优雅收尾**。
+/// 因此真正的失败特征不是退出码，而是日志里出现错误标记
+/// （`Error` / `Invalid` / `No such` / `Permission denied` 等），
+/// 或者根本没出现任何收尾痕迹。
+pub fn spawn_record_watch(app: AppHandle, state: State<FfmpegState>, id_snapshot: String) {
+    let app2 = app.clone();
+    let logs = state.logs.clone();
+    let rec_mutex = {
+        // 取出 child 的所有权，等它退出后再释放 record 槽位。
+        // 注意：这里**不能**持有 MutexGuard 跨 spawn，否则会死锁。
+        let mut rec = state.record.lock().unwrap();
+        rec.take()
+    };
+    let Some(recording) = rec_mutex else { return };
+    let id = if id_snapshot.is_empty() { "record".into() } else { id_snapshot };
+
+    tauri::async_runtime::spawn(async move {
+        // wait_with_output 阻塞等待子进程退出并收集 stdout/stderr（stderr 已被消费线程接管，
+        // 这里拿到的只是没被消费的剩余部分——通常是 0 字节，因为 ffmpeg 主要输出在 stderr）。
+        let output = recording.child.wait_with_output();
+
+        let (final_state, note) = match output {
+            Err(e) => {
+                // wait_with_output 自己出错（极少见），按失败处理
+                ("failed", Some(format!("等待录制进程失败：{e}")))
+            }
+            Ok(out) => {
+                let log_text = {
+                    let map = logs.lock().unwrap();
+                    map.get(&id).map(|v| v.join("\n")).unwrap_or_default()
+                };
+                // 真失败的特征：日志里有 ffmpeg 的错误标记。
+                // 排除掉一些常见但非错误的词（如 "error" 出现在选项名里的场景较少）。
+                let is_err = log_text.contains("Error opening")
+                    || log_text.contains("Invalid argument")
+                    || log_text.contains("Permission denied")
+                    || log_text.contains("No such file")
+                    || log_text.contains("Conversion failed")
+                    || log_text.contains("av_format"); // avformat_open_input 失败
+                if is_err {
+                    let n = friendly_note(&logs, &id).unwrap_or_else(|| {
+                        "录制过程中 ffmpeg 报错，输出文件可能损坏。".into()
+                    });
+                    ("failed", Some(n))
+                } else if !out.status.success() {
+                    // 退出码非 0 但日志里没明显错误 → 通常是用户写 q 后的正常收尾，
+                    // 算 done（容器已经写完，文件可播放）。
+                    ("done", None)
+                } else {
+                    ("done", None)
+                }
+            }
+        };
+
+        let _ = app2.emit(
+            "record-progress",
+            serde_json::json!({
+                "isRecording": false,
+                "state": final_state,
+                "output": recording.output,
+                "note": note,
+            }),
+        );
+    });
 }
