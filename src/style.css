@@ -56,7 +56,9 @@ body {
 .chip.active,
 .filter-chip.active {
   background: rgb(var(--brand));
-  color: var(--on-brand);
+  /* --on-brand 是裸 RGB 分量（255 255 255），必须套 rgb() 才是合法颜色；
+     直接 var() 会整条声明失效 → 选中态文字继承深色，紫底上看不见 */
+  color: rgb(var(--on-brand));
   font-weight: 600;
   border-color: rgb(var(--brand));
 }
@@ -97,6 +99,20 @@ select:focus-visible,
 .skip-link:focus {
   left: 1rem;
   top: 1rem;
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.toast-in {
+  animation: toastIn 0.22s ease-out;
 }
 @media (prefers-reduced-motion: reduce) {
   * {

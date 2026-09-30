@@ -49,7 +49,11 @@ const NAV: { tab: string; label: string; icon: string }[] = [
         @keydown.space.prevent="setTab(n.tab); emit('close')"
       >
         <span class="nav-ico text-muted" v-html="`<svg class='w-[18px] h-[18px]' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'>${n.icon}</svg>`"></span>
-        {{ n.label }}
+        <span class="truncate">{{ n.label }}</span>
+        <span
+          v-if="n.tab === 'tasks' && store.tasks.filter((t) => t.status === 'running').length > 0"
+          class="ml-auto text-[11px] font-semibold text-white bg-brand rounded-full min-w-[18px] h-[18px] px-1.5 flex items-center justify-center"
+        >{{ store.tasks.filter((t) => t.status === 'running').length }}</span>
       </a>
     </nav>
 

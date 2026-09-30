@@ -43,6 +43,13 @@ function confirmClearFailed() {
   if (stats.value.failed === 0) return;
   if (window.confirm("确定移除所有失败/已取消的任务吗？")) clearFailed();
 }
+function confirmRemove(id: string) {
+  if (window.confirm("确定移除该任务吗？移除后无法恢复其日志。")) removeTask(id);
+}
+function confirmClearDone() {
+  if (stats.value.done === 0) return;
+  if (window.confirm("确定清空所有已完成的任务吗？")) clearDone();
+}
 
 function fmtDur(ts: number | null, end?: number | null) {
   if (!ts) return "";
@@ -183,7 +190,7 @@ async function copy(text: string, which: "cmd" | "log") {
           <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
           清空全部
         </button>
-        <button class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-panel2 text-sm hover:border-brand hover:bg-brand/5 cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed" :disabled="stats.done === 0" @click="clearDone">
+        <button class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-panel2 text-sm hover:border-brand hover:bg-brand/5 cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed" :disabled="stats.done === 0" @click="confirmClearDone">
           <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
           清空已完成
         </button>
@@ -221,7 +228,7 @@ async function copy(text: string, which: "cmd" | "log") {
               <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
               重试
             </button>
-            <button class="inline-flex items-center gap-1 text-xs text-muted hover:text-brand hover:bg-brand/10 rounded-md px-1.5 py-1 transition-colors cursor-pointer" @click="removeTask(t.id)">
+            <button class="inline-flex items-center gap-1 text-xs text-muted hover:text-brand hover:bg-brand/10 rounded-md px-1.5 py-1 transition-colors cursor-pointer" @click="confirmRemove(t.id)">
               <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               移除
             </button>

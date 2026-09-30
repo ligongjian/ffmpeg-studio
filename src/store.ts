@@ -66,7 +66,35 @@ export const store = reactive({
   fmt: "mp4",
   /** 压缩页当前 CRF，同时就是设置里的「默认 CRF」 */
   crf: 23,
+  /** 轻量提示（加入队列等操作的反馈），由 App.vue 渲染 */
+  toast: { msg: "", type: "info" as "info" | "success" | "error", key: 0 },
+
+  // ===== 录制采集会话（独立于任务队列）=====
+  /** 是否正在录制。录制期间不允许再开始新录制，也不进任务队列。 */
+  recording: false,
+  /** 录制已持续的秒数（由后端推送的 record-progress 事件驱动更新） */
+  recordElapsed: 0,
+  /** 录制开始时的输出文件名（不含路径，仅文件名） */
+  recordOutput: "",
+  /** 录制结束后的状态：done / failed / canceled，进行中为空 */
+  recordState: "",
+  /** 录制失败/异常时的说明 */
+  recordNote: "",
 });
+
+let toastTimer: number | undefined;
+export function showToast(
+  msg: string,
+  type: "info" | "success" | "error" = "success"
+) {
+  store.toast.msg = msg;
+  store.toast.type = type;
+  store.toast.key++;
+  if (toastTimer) window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
+    store.toast.msg = "";
+  }, 2600);
+}
 
 /** 主题持久化到本地存储（WebView 的用户数据目录，重启后仍在） */
 const THEME_KEY = "ffs-theme";
@@ -93,6 +121,8 @@ export async function initStore() {
   }
   applyTheme();
   await listen<FfmpegProgress>("ffmpeg-progress", (e) => onProgress(e.payload));
+  // 录制会话进度事件：与 ffmpeg-progress 互补，专门推送录制开始/结束/时长
+  await listen<RecordProgressPayload>("record-progress", (e) => onRecordProgress(e.payload));
   await loadSettings();
   try {
     const ver = await invoke<string>("ffmpeg_version");
@@ -155,6 +185,34 @@ interface FfmpegProgress {
   note?: string;
 }
 
+/** 后端推送的录制会话事件载荷（isRecording=false 时表示会话结束） */
+interface RecordProgressPayload {
+  isRecording: boolean;
+  elapsed?: number;
+  state?: "done" | "failed" | "canceled" | "";
+  output?: string;
+  note?: string;
+}
+
+function onRecordProgress(p: RecordProgressPayload) {
+  if (p.isRecording) {
+    store.recording = true;
+    if (typeof p.elapsed === "number") store.recordElapsed = p.elapsed;
+    return;
+  }
+  // 会话结束
+  store.recording = false;
+  store.recordState = p.state || "";
+  store.recordNote = p.note || "";
+  if (p.output) store.recordOutput = p.output;
+  // 录制失败时闪窗口提醒（与任务完成通知一致的产品语义）
+  if (p.state === "failed" && store.notifyOnDone) {
+    showToast(p.note || "录制异常结束", "error");
+  } else if (p.state === "done") {
+    showToast(`录制完成：${p.output || "文件"}`, "success");
+  }
+}
+
 export function applyTheme() {
   document.documentElement.classList.toggle("dark", store.dark);
 }
@@ -171,6 +229,81 @@ export function toggleTheme() {
 
 export function setTab(tab: string) {
   store.tab = tab;
+}
+
+// ===== 录制采集（独立会话，不进任务队列）=====
+
+/**
+ * 启动录制：把前端拼好的 ffmpeg 命令交给后端拉起子进程。
+ * 与 queueTask 不同——这里没有"排队"概念，立即执行，且全局只能有一段。
+ */
+export async function startRecording(cmd: string, outDir: string): Promise<void> {
+  if (store.recording) {
+    showToast("已有录制在进行，请先停止再开始新的录制", "error");
+    return;
+  }
+  try {
+    await invoke("start_record", { opts: { cmd, outDir } });
+    store.recording = true;
+    store.recordElapsed = 0;
+    store.recordState = "";
+    store.recordNote = "";
+    // 输出名后端会从命令行末尾反查，这里用占位，结束时由事件覆盖
+    store.recordOutput = "";
+    showToast("录制已开始");
+  } catch (e) {
+    showToast(typeof e === "string" ? e : "启动录制失败", "error");
+  }
+}
+
+/** 停止录制：优雅收尾（后端向 ffmpeg 的 stdin 写 q，让它写完容器尾部） */
+export async function stopRecording(): Promise<void> {
+  try {
+    await invoke("stop_record");
+  } catch (e) {
+    showToast(typeof e === "string" ? e : "停止录制失败", "error");
+  }
+}
+
+/** 列出物理显示器（gdigrab 设备枚举） */
+export async function listDisplays(): Promise<
+  { x: number; y: number; width: number; height: number; normalizedX: number; index: number }[]
+> {
+  try {
+    return await invoke<{
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      normalizedX: number;
+      index: number;
+    }[]>("list_displays");
+  } catch (e) {
+    console.error("list_displays failed:", e);
+    return [];
+  }
+}
+
+/** 列出 DShow 视频/音频设备 */
+export async function listDevices(): Promise<
+  { kind: "video" | "audio"; name: string; identifier: string }[]
+> {
+  try {
+    return await invoke("list_devices");
+  } catch (e) {
+    console.error("list_devices failed:", e);
+    return [];
+  }
+}
+
+/** 选择录制输出目录（原生文件夹对话框） */
+export async function pickRecordDir(): Promise<string | null> {
+  try {
+    return await invoke<string | null>("pick_record_dir");
+  } catch (e) {
+    console.error(e);
+    return null;
+  }
 }
 
 export async function pickInput() {
@@ -244,6 +377,7 @@ export function queueTask(name: string, cmd: string, cwd?: string) {
     finishedAt: null,
     cwd,
   });
+  showToast(`已加入队列：${name}`);
   pump();
 }
 
@@ -262,6 +396,7 @@ export function queueTasks(items: { name: string; cmd: string; cwd?: string }[])
       cwd: it.cwd,
     })
   );
+  showToast(`已加入队列：${items.length} 个任务`);
   pump();
 }
 

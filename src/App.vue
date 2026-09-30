@@ -55,4 +55,21 @@ function toggleSidebar() {
       </div>
     </main>
   </div>
+
+  <!-- 轻量提示：加入队列等操作的结果反馈（右下角，自动消失） -->
+  <div
+    v-if="store.toast.msg"
+    :key="store.toast.key"
+    class="toast-in fixed bottom-6 right-6 z-[80] flex items-center gap-2 max-w-xs bg-panel border border-panel2 shadow-lg rounded-xl px-4 py-3 text-sm"
+  >
+    <span
+      class="w-2 h-2 rounded-full shrink-0"
+      :class="{
+        'bg-emerald-500': store.toast.type === 'success',
+        'bg-brand': store.toast.type === 'info',
+        'bg-red-500': store.toast.type === 'error',
+      }"
+    ></span>
+    <span class="text-chalk/90">{{ store.toast.msg }}</span>
+  </div>
 </template>
