@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { reactive, ref, computed } from "vue";
+import { reactive, ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { store, pickInput, setInputFile } from "../store";
 
 interface StreamInfo {
   index: number;
@@ -35,12 +37,17 @@ const panels = computed(() =>
 );
 
 async function pick(slot: "a" | "b") {
+  // A 槽走全局输入：与工作台共享同一份源文件，换文件时由下方 watch 自动同步并重新探测
+  if (slot === "a") {
+    await pickInput();
+    return;
+  }
+  // B 槽是对比用的第二份文件，独立选择，不写入全局以免污染工作台的源
   try {
     const p = await invoke<string | null>("pick_file");
     if (p) {
-      const s = slot === "a" ? a : b;
-      s.file = p;
-      await probe(slot);
+      b.file = p;
+      await probe("b");
     }
   } catch (e) {
     console.error(e);
@@ -60,6 +67,78 @@ async function probe(slot: "a" | "b") {
   } finally {
     s.probing = false;
   }
+}
+
+// A 槽复用工作台的当前源文件：进入页面即带入，工作台换文件时同步并重新探测
+watch(
+  () => store.inputFile,
+  (v) => {
+    a.file = v || "";
+    a.info = null;
+    a.err = "";
+    if (v) void probe("a");
+  },
+  { immediate: true }
+);
+
+// 拖放区：Tauri 在 webview 层拦截系统文件拖拽，只能经由 onDragDropEvent 拿真实路径
+const zoneA = ref<HTMLElement | null>(null);
+const zoneB = ref<HTMLElement | null>(null);
+const dragOverA = ref(false);
+const dragOverB = ref(false);
+const dragState = computed<Record<"a" | "b", boolean>>(() => ({
+  a: dragOverA.value,
+  b: dragOverB.value,
+}));
+let unlisten: (() => void) | null = null;
+
+function setZone(key: "a" | "b", el: unknown) {
+  const node = (el as HTMLElement | null) ?? null;
+  if (key === "a") zoneA.value = node;
+  else zoneB.value = node;
+}
+
+/** 事件里的 position 是物理像素，换算成 CSS 像素后判断指针是否落在某拖放区内 */
+function inZone(el: HTMLElement | null, pos: { x: number; y: number }): boolean {
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const x = pos.x / dpr;
+  const y = pos.y / dpr;
+  return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+}
+
+onMounted(async () => {
+  unlisten = await getCurrentWebview().onDragDropEvent((event) => {
+    const p = event.payload;
+    if (p.type === "enter" || p.type === "over") {
+      dragOverA.value = inZone(zoneA.value, p.position);
+      dragOverB.value = inZone(zoneB.value, p.position);
+    } else if (p.type === "drop") {
+      const toA = inZone(zoneA.value, p.position);
+      const toB = inZone(zoneB.value, p.position);
+      dragOverA.value = false;
+      dragOverB.value = false;
+      if (!p.paths.length) return;
+      if (toA) setInputFile(p.paths[0]);
+      else if (toB) {
+        b.file = p.paths[0];
+        void probe("b");
+      }
+    } else {
+      dragOverA.value = false;
+      dragOverB.value = false;
+    }
+  });
+});
+
+onUnmounted(() => {
+  unlisten?.();
+  unlisten = null;
+});
+
+function fileName(f: string): string {
+  return f.split(/[\\/]/).pop() || f;
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -112,13 +191,28 @@ function streamDetail(st: StreamInfo): string {
 
     <div class="grid gap-4" :class="compare ? 'md:grid-cols-2' : 'grid-cols-1'">
       <div v-for="p in panels" :key="p.key" class="card rounded-2xl p-5 space-y-4">
-        <div class="flex items-center justify-between">
+        <div class="flex items-center justify-between gap-2">
           <span class="text-xs font-semibold px-2 py-0.5 rounded bg-panel2 text-muted uppercase">{{ p.key === 'a' ? '文件 A' : '文件 B' }}</span>
-          <span class="text-brand text-xs cursor-pointer lk" @click="pick(p.key)">选择文件</span>
+          <span v-if="p.key === 'a'" class="text-[11px] text-muted">复用工作台当前源文件</span>
         </div>
 
-        <div class="rounded-xl border border-panel2 bg-ink/40 px-4 py-3 text-sm break-all">
-          {{ p.slot.file || "未选择文件" }}
+        <div
+          :ref="(el) => setZone(p.key, el)"
+          class="rounded-xl border-2 border-dashed px-4 py-5 text-sm flex flex-col items-center justify-center gap-2 cursor-pointer transition-all"
+          :class="dragState[p.key] ? 'border-brand bg-brand/10 shadow-glow' : 'border-panel2 bg-ink/40 hover:border-brand hover:bg-brand/5 hover:shadow-glow'"
+          @click="pick(p.key)"
+        >
+          <template v-if="p.slot.file">
+            <div class="font-medium truncate max-w-full" :title="p.slot.file">{{ fileName(p.slot.file) }}</div>
+            <div v-if="p.slot.info" class="text-[11px] text-muted">
+              {{ fmtDuration(p.slot.info.duration) }} · {{ fmtBytes(p.slot.info.size) }} · {{ p.slot.info.streams.length }} 条流
+            </div>
+            <span class="text-brand text-xs">重新选择 / 拖拽替换</span>
+          </template>
+          <template v-else>
+            <div class="font-medium">点击或拖拽选择媒体文件</div>
+            <div class="text-[11px] text-muted">支持音视频 / 图片等常见格式</div>
+          </template>
         </div>
 
         <div v-if="p.slot.probing" class="text-sm text-muted">读取中…</div>
@@ -164,7 +258,7 @@ function streamDetail(st: StreamInfo): string {
             </div>
           </div>
         </div>
-        <div v-else class="text-sm text-muted">选择一个媒体文件以查看其详细信息。</div>
+        <div v-else class="text-sm text-muted">点击上方区域或拖入一个媒体文件以查看其详细信息。</div>
       </div>
     </div>
   </div>
