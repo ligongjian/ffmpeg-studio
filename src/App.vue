@@ -14,6 +14,9 @@ import Filters from "./views/Filters.vue";
 import Record from "./views/Record.vue";
 import Stream from "./views/Stream.vue";
 import Batch from "./views/Batch.vue";
+import Audio from "./views/Audio.vue";
+import Gif from "./views/Gif.vue";
+import Info from "./views/Info.vue";
 import Settings from "./views/Settings.vue";
 import Tasks from "./views/Tasks.vue";
 
@@ -50,6 +53,9 @@ function toggleSidebar() {
         <Record v-show="store.tab === 'record'" />
         <Stream v-show="store.tab === 'stream'" />
         <Batch v-show="store.tab === 'batch'" />
+        <Audio v-show="store.tab === 'audio'" />
+        <Gif v-show="store.tab === 'gif'" />
+        <Info v-show="store.tab === 'info'" />
         <Settings v-show="store.tab === 'settings'" />
         <Tasks v-show="store.tab === 'tasks'" />
       </div>

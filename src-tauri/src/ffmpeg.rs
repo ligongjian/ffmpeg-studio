@@ -434,15 +434,31 @@ pub fn probe_media_duration(state: State<FfmpegState>, path: String) -> Result<f
     probe_media_info_full(&path, &state.ffmpeg_path()).map(|i| i.duration)
 }
 
-/// 媒体文件信息：文件大小（字节）、时长（秒）、主视频流码率（bps，可选）。
+/// 单个流的元信息（用于前端探针展示逐流详情）。
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamInfo {
+    pub index: u32,
+    pub codec_type: String,
+    pub codec_name: String,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub sample_rate: Option<u32>,
+    pub channels: Option<u32>,
+    pub bit_rate: Option<u64>,
+}
+
+/// 媒体文件信息：文件大小、时长、封装格式，以及全部流的逐流详情。
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MediaInfo {
     pub size: u64,
     pub duration: f64,
+    pub format_name: Option<String>,
     pub video_bitrate: Option<u64>,
     pub video_width: Option<u32>,
     pub video_height: Option<u32>,
+    pub streams: Vec<StreamInfo>,
 }
 
 /// 把 ffmpeg 可执行文件路径里的"ffmpeg"改成"ffprobe"。
@@ -550,8 +566,9 @@ fn probe_media_info_full(path: &str, ffmpeg_bin: &str) -> Result<MediaInfo, Stri
     let mut cmd = Command::new(&ffprobe);
     cmd.args([
         "-v", "error",
-        "-show_entries", "format=duration",
-        "-show_entries", "stream=index,codec_type,bit_rate,avg_bit_rate,width,height",
+        "-show_entries", "format=duration,format_name",
+        "-show_entries",
+        "stream=index,codec_type,codec_name,bit_rate,width,height,sample_rate,channels",
         "-of", "json",
         path,
     ]);
@@ -566,51 +583,90 @@ fn probe_media_info_full(path: &str, ffmpeg_bin: &str) -> Result<MediaInfo, Stri
     }
 
     // 不引入 serde_json 解析，逐行扫 JSON——简单且足够稳定。
-    // format 段先于 stream 段出现；用 in_stream 标记，遇到 codec_type 切换流。
+    // ffprobe -of json 把每个 stream 输出为独立的 `{ ... }` 块，顶层 format 段在其后。
     let text = String::from_utf8_lossy(&out.stdout);
     let mut duration = 0.0_f64;
+    let mut format_name: Option<String> = None;
     let mut video_bitrate: Option<u64> = None;
     let mut width: Option<u32> = None;
     let mut height: Option<u32> = None;
-    // 当前所在的 stream 是否为视频（遇到下一行 codec_type 才确定，先用待定标记）
-    let mut pending_codec: Option<bool> = None;
-    let mut current_is_video = false;
+    let mut streams: Vec<StreamInfo> = Vec::new();
+    let mut cur: Option<StreamInfo> = None;
+
+    fn parse_opt_u32(v: &str) -> Option<u32> {
+        let s = v.trim().trim_end_matches(',').trim();
+        if s.starts_with('"') {
+            return None; // "N/A" 等字符串，无数值
+        }
+        s.parse::<u32>().ok()
+    }
+    fn parse_opt_u64(v: &str) -> Option<u64> {
+        let s = v.trim().trim_end_matches(',').trim();
+        if s.starts_with('"') {
+            return None;
+        }
+        s.parse::<u64>().ok()
+    }
 
     for line in text.lines() {
         let line = line.trim();
         if let Some(v) = line.strip_prefix("\"duration\":") {
             let num = v.trim().trim_end_matches(',').trim().trim_matches('"');
             duration = num.parse::<f64>().unwrap_or(duration);
-        } else if let Some(v) = line.strip_prefix("\"codec_type\":") {
-            // codec_type 出现在同一 stream 块的开头，先记下，等本块字段读完后才切换
-            pending_codec = Some(v.trim().trim_matches('"') == "video");
-            current_is_video = false;
-        } else if current_is_video || pending_codec == Some(true) {
-            // 只有视频流字段才计入
-            if let Some(v) = line.strip_prefix("\"bit_rate\":") {
-                let v = v.trim().trim_end_matches(',').trim_matches('"');
-                if v != "N/A" {
-                    if let Ok(n) = v.parse::<u64>() {
-                        video_bitrate = Some(n);
-                    }
-                }
-            } else if let Some(v) = line.strip_prefix("\"avg_bit_rate\":") {
-                let v = v.trim().trim_end_matches(',').trim_matches('"');
-                if v != "N/A" {
-                    if let Ok(n) = v.parse::<u64>() {
-                        video_bitrate = Some(n);
-                    }
-                }
-            } else if let Some(v) = line.strip_prefix("\"width\":") {
-                width = width.or_else(|| v.trim().trim_end_matches(',').parse::<u32>().ok());
-            } else if let Some(v) = line.strip_prefix("\"height\":") {
-                height = height.or_else(|| v.trim().trim_end_matches(',').parse::<u32>().ok());
-            }
+            continue;
         }
-        // 一行字段读完后才把 pending_codec 固化，保证 block 边界正确
-        if line.ends_with('{') || line.ends_with('}') {
-            if let Some(v) = pending_codec.take() {
-                current_is_video = v;
+        if let Some(v) = line.strip_prefix("\"format_name\":") {
+            let s = v.trim().trim_end_matches(',').trim().trim_matches('"');
+            format_name = Some(s.to_string());
+            continue;
+        }
+        // 新的 stream 对象开始：顶层 `streams` 数组里每个 `{` 独占一行
+        if line == "{" && cur.is_none() {
+            cur = Some(StreamInfo {
+                index: 0,
+                codec_type: String::new(),
+                codec_name: String::new(),
+                width: None,
+                height: None,
+                sample_rate: None,
+                channels: None,
+                bit_rate: None,
+            });
+            continue;
+        }
+        if let Some(c) = &mut cur {
+            if let Some(v) = line.strip_prefix("\"index\":") {
+                c.index = v.trim().trim_end_matches(',').trim().parse().unwrap_or(0);
+            } else if let Some(v) = line.strip_prefix("\"codec_type\":") {
+                c.codec_type = v.trim().trim_end_matches(',').trim().trim_matches('"').to_string();
+            } else if let Some(v) = line.strip_prefix("\"codec_name\":") {
+                c.codec_name = v.trim().trim_end_matches(',').trim().trim_matches('"').to_string();
+            } else if let Some(v) = line.strip_prefix("\"width\":") {
+                c.width = parse_opt_u32(v);
+            } else if let Some(v) = line.strip_prefix("\"height\":") {
+                c.height = parse_opt_u32(v);
+            } else if let Some(v) = line.strip_prefix("\"sample_rate\":") {
+                c.sample_rate = parse_opt_u32(v);
+            } else if let Some(v) = line.strip_prefix("\"channels\":") {
+                c.channels = parse_opt_u32(v);
+            } else if let Some(v) = line.strip_prefix("\"bit_rate\":") {
+                c.bit_rate = parse_opt_u64(v);
+            }
+            // 流对象结束（顶层每个 `}` 独占一行，可能带尾逗号）
+            if line.ends_with('}') {
+                if c.codec_type == "video" {
+                    if width.is_none() {
+                        width = c.width;
+                    }
+                    if height.is_none() {
+                        height = c.height;
+                    }
+                    if video_bitrate.is_none() {
+                        video_bitrate = c.bit_rate;
+                    }
+                }
+                streams.push(c.clone());
+                cur = None;
             }
         }
     }
@@ -618,9 +674,11 @@ fn probe_media_info_full(path: &str, ffmpeg_bin: &str) -> Result<MediaInfo, Stri
     Ok(MediaInfo {
         size,
         duration,
+        format_name,
         video_bitrate,
         video_width: width,
         video_height: height,
+        streams,
     })
 }
 

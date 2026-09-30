@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { reactive, computed, watch } from "vue";
 import { store, pickInput, probeInput, saveSettings } from "../store";
-import { buildCompress } from "../lib/ffmpeg";
+import { buildCompress, HWACCEL_ENCODERS } from "../lib/ffmpeg";
 import CommandCard from "../components/CommandCard.vue";
 import SegGroup from "../components/SegGroup.vue";
 import { baseName } from "../lib/format";
 
 // CRF 与「设置 → 默认输出 → 默认 CRF」共用同一个值
-const s = reactive({ preset: "medium", res: "", bitrate: "" });
+const s = reactive({ preset: "medium", res: "", bitrate: "", hwaccel: "" });
 const inputName = computed(() => store.inputFile || "input.mp4");
 // 输出文件名：沿用源 basename 保持 .mp4；源本身已是 mp4 时追加 .compressed 防自覆盖
 const outputName = computed(() => {
@@ -15,7 +15,7 @@ const outputName = computed(() => {
   return /\.mp4$/i.test(inputName.value) ? `${base}.compressed.mp4` : `${base}.mp4`;
 });
 const cmd = computed(() =>
-  buildCompress({ input: inputName.value, crf: store.crf, preset: s.preset, res: s.res, bitrate: s.bitrate })
+  buildCompress({ input: inputName.value, crf: store.crf, preset: s.preset, res: s.res, bitrate: s.bitrate, hwaccel: s.hwaccel })
 );
 
 // 换文件后自动重测元信息（inputFile 由 setInputFile 写入；这里覆盖"重新选同名文件"之类的边界）
@@ -198,6 +198,16 @@ function fmtDuration(s: number): string {
             { value: 'veryslow', label: 'veryslow' },
           ]"
         />
+      </div>
+
+      <div>
+        <label class="text-xs text-muted">硬件加速编码（可选，需对应显卡驱动）</label>
+        <select v-model="s.hwaccel" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none">
+          <option v-for="e in HWACCEL_ENCODERS" :key="e.value" :value="e.value">{{ e.label }}</option>
+        </select>
+        <p v-if="s.hwaccel" class="text-[11px] text-muted mt-1">
+          已选用 {{ HWACCEL_ENCODERS.find((e) => e.value === s.hwaccel)?.label }}，质量参数按 CRF 映射到 -cq / -global_quality；需本机装有对应显卡与驱动。
+        </p>
       </div>
 
       <div class="grid md:grid-cols-2 gap-4">

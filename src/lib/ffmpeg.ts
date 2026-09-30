@@ -59,6 +59,7 @@ export const AUDIO_ONLY_FMT: Record<string, string> = {
   aac: "aac",
   wav: "pcm_s16le",
   flac: "flac",
+  opus: "libopus",
 };
 
 /** 只有视频、没有音轨的容器 */
@@ -87,6 +88,8 @@ export interface ConvertOpts {
   faststart: boolean;
   deint: boolean;
   norm: boolean;
+  /** 硬件加速编码器（如 h264_nvenc / hevc_amf）；空 = 使用 enc 指定的软件编码 */
+  hwaccel: string;
 }
 
 export function buildConvert(o: ConvertOpts): string {
@@ -105,10 +108,16 @@ export function buildConvert(o: ConvertOpts): string {
     // gif 没有音轨，也不能用 libx264 系编码
     parts.push("-c:v gif", "-an");
     if (o.res) parts.push(`-vf scale=${o.res}`);
-  } else if (o.enc === "copy") {
+  } else if (o.enc === "copy" && !o.hwaccel) {
     parts.push("-c copy");
   } else {
-    parts.push(`-c:v ${o.enc} -crf ${o.quality}`);
+    if (o.hwaccel) {
+      // NVENC / AMF 用 -cq，QSV 用 -global_quality
+      const q = o.hwaccel.includes("qsv") ? `-global_quality ${o.quality}` : `-cq ${o.quality}`;
+      parts.push(`-c:v ${o.hwaccel} ${q}`);
+    } else {
+      parts.push(`-c:v ${o.enc} -crf ${o.quality}`);
+    }
     if (vf.length) parts.push(`-vf ${vf.join(",")}`);
     parts.push(`-c:a ${o.aud}`);
   }
@@ -130,10 +139,20 @@ export interface CompressOpts {
   preset: string;
   res: string;
   bitrate: string;
+  /** 硬件加速编码器（如 h264_nvenc / hevc_qsv）；空 = 软件编码 libx265 */
+  hwaccel: string;
+}
+
+/** 视频编码器选择：硬件加速优先，否则回退软件编码；质量参数按编码器类型适配 */
+function videoEnc(o: { hwaccel: string; crf: number; preset: string }, swEnc: string): string {
+  if (!o.hwaccel) return `-c:v ${swEnc} -crf ${o.crf} -preset ${o.preset}`;
+  // NVENC / AMF 用 -cq 控制质量（类 CRF），QSV 用 -global_quality；预设交编码器默认即可
+  const q = o.hwaccel.includes("qsv") ? `-global_quality ${o.crf}` : `-cq ${o.crf}`;
+  return `-c:v ${o.hwaccel} ${q}`;
 }
 
 export function buildCompress(o: CompressOpts): string {
-  const parts = [`-i ${q(o.input)}`, `-c:v libx265 -crf ${o.crf} -preset ${o.preset}`];
+  const parts = [`-i ${q(o.input)}`, videoEnc(o, "libx265")];
   if (o.res) parts.push(`-vf scale=${o.res}`);
   if (o.bitrate) parts.push(`-b:v ${o.bitrate}`);
   // 输出文件名沿用源 basename，保持 .mp4 后缀；源本身已是 mp4 时加 .compressed 避免自覆盖
@@ -143,17 +162,36 @@ export function buildCompress(o: CompressOpts): string {
   return ffmpegCmd(parts.join(" "));
 }
 
+export interface CutSplit {
+  type: "equal" | "segment";
+  /** 每段秒数；equal 模式由前端按总长/段数折算后传入 */
+  segDur: number;
+  /** equal 模式的段数（仅展示用） */
+  count?: number;
+}
+
 export interface CutOpts {
   input: string;
   start: string;
   end: string;
   mode: "re" | "copy";
+  /** 拆分模式：传入则按段拆分，忽略 start/end 单段裁剪 */
+  split?: CutSplit;
 }
 
 export function buildCut(o: CutOpts): string {
+  const base = baseName(o.input).replace(/\.[^./\\]+$/, "") || "output";
+  // 拆分模式：用 segment muxer 一次性切成多段
+  if (o.split && o.split.segDur > 0) {
+    const enc = o.mode === "copy" ? "-c copy" : "-c:v libx264 -crf 23 -c:a aac";
+    const out = outArg(`${base}.part.%03d.mp4`);
+    return ffmpegCmd(
+      `-i ${q(o.input)} -f segment -segment_time ${o.split.segDur} -reset_timestamps 1 ${enc} ${out}`
+    );
+  }
+  // 单段裁剪
   const parts = [`-ss ${o.start} -to ${o.end} -i ${q(o.input)}`];
   // 输出文件名沿用源 basename 保持 .mp4；源本身是 mp4 时加 .clip 防自覆盖
-  const base = baseName(o.input).replace(/\.[^./\\]+$/, "") || "output";
   const outName = /\.mp4$/i.test(o.input) ? `${base}.clip.mp4` : `${base}.mp4`;
   parts.push(
     o.mode === "copy"
@@ -833,4 +871,162 @@ export function buildBatch(o: BatchOpts): BatchItem[] {
     const out = batchOut(f, ext, o.outDir);
     return { file: f, out, cmd: ffmpegCmd(`${body} ${outArg(out)}`) };
   });
+}
+
+/** 硬件加速编码器清单（压缩/转换页共用）。空串表示走软件编码。 */
+export const HWACCEL_ENCODERS: { value: string; label: string }[] = [
+  { value: "", label: "软件编码（CPU）" },
+  { value: "h264_nvenc", label: "NVIDIA H.264 (NVENC)" },
+  { value: "hevc_nvenc", label: "NVIDIA H.265 (NVENC)" },
+  { value: "h264_qsv", label: "Intel H.264 (QSV)" },
+  { value: "hevc_qsv", label: "Intel H.265 (QSV)" },
+  { value: "h264_amf", label: "AMD H.264 (AMF)" },
+  { value: "hevc_amf", label: "AMD H.265 (AMF)" },
+];
+
+export interface GifOpts {
+  input: string;
+  /** 起始时间 -ss，如 "00:00:01" / "5" */
+  start: string;
+  /** 时长 -t（秒），空=到结尾 */
+  duration: string;
+  /** 帧率，默认 15 */
+  fps: number;
+  /** 输出宽度（像素），0 = 保持原始宽度 */
+  width: number;
+  /** 循环：0=无限循环，-1=不循环，N=循环 N 次（GIF muxer 的 -loop 语义） */
+  loop: number;
+}
+
+/** GIF 动图：palettegen + paletteuse 两步法（比直接 -c:v gif 色彩干净得多） */
+export function buildGif(o: GifOpts): string {
+  const parts: string[] = [];
+  if (o.start) parts.push(`-ss ${o.start}`);
+  if (o.duration) parts.push(`-t ${o.duration}`);
+  parts.push(`-i ${q(o.input)}`);
+  const vf: string[] = [`fps=${o.fps > 0 ? o.fps : 15}`];
+  if (o.width > 0) vf.push(`scale=${o.width}:-1:flags=lanczos`);
+  // split → palettegen 生成调色板 → paletteuse 套用
+  vf.push("split[s0][s1]", "[s0]palettegen[p]", "[s1][p]paletteuse");
+  parts.push(`-vf "${vf.join(",")}"`, "-an"); // GIF 无音轨
+  if (o.loop >= 0) parts.push(`-loop ${o.loop}`);
+  const base = baseName(o.input).replace(/\.[^./\\]+$/, "") || "output";
+  parts.push(outArg(`${base}.gif`));
+  return ffmpegCmd(parts.join(" "));
+}
+export interface AudioOpts {
+  /** process = 对单个文件做音频处理；concat = 多个音频顺序拼接 */
+  mode: "process" | "concat";
+  /** process 模式的输入 */
+  input: string;
+  /** concat 模式的文件列表（顺序即拼接顺序） */
+  files: string[];
+  /** 输出格式：mp3 / m4a / wav / flac / opus */
+  outFmt: string;
+  /** 音质档位：high / standard / small（按容器映射到 VBR 质量 / 码率 / 压缩级别） */
+  quality: "high" | "standard" | "small";
+  /** 采样率 Hz，0 = 保持原始 */
+  sampleRate: number;
+  /** 响度归一化（loudnorm） */
+  normalize: boolean;
+  /** 目标响度 LUFS（normalize 时生效，默认 -16） */
+  loudnormI: number;
+  /** 淡入时长（秒），0 = 不淡入 */
+  fadeIn: number;
+  /** 淡出时长（秒），0 = 不淡出 */
+  fadeOut: number;
+  /** 音量增益（dB），0 = 不变（可为负） */
+  volumeGain: number;
+  /** 去除首尾静音 */
+  silenceRemove: boolean;
+  /** 声道：0=保持，1=单声道，2=立体声 */
+  channels: number;
+}
+
+/**
+ * 按容器把「音质档位」翻成 ffmpeg 参数：
+ * - mp3：VBR `-q:a`（0 最好 → 9 最小）
+ * - aac/m4a、opus：固定码率 `-b:a`
+ * - flac：`-compression_level`（0 最快 → 12 最小）
+ * - wav：PCM 无损，档位无意义，不加参数
+ */
+function audioQualityArgs(fmt: string, q: string): string[] {
+  switch (fmt) {
+    case "mp3": {
+      const vbr = q === "high" ? 0 : q === "small" ? 4 : 2;
+      return [`-q:a ${vbr}`];
+    }
+    case "m4a":
+    case "aac": {
+      const br = q === "high" ? 192 : q === "small" ? 96 : 128;
+      return [`-b:a ${br}k`];
+    }
+    case "opus": {
+      const br = q === "high" ? 160 : q === "small" ? 64 : 96;
+      return [`-b:a ${br}k`];
+    }
+    case "flac": {
+      const cl = q === "high" ? 12 : q === "small" ? 0 : 5;
+      return [`-compression_level ${cl}`];
+    }
+    default:
+      return []; // wav = pcm_s16le，采样位深固定
+  }
+}
+
+/** 通用 af 片段：淡入/淡出/音量/响度/去静音，按推荐顺序排列 */
+function buildAudioFilters(o: AudioOpts): string[] {
+  const af: string[] = [];
+  if (o.fadeIn > 0) af.push(`afade=t=in:st=0:d=${o.fadeIn}`);
+  if (o.fadeOut > 0) af.push(`afade=t=out:d=${o.fadeOut}`);
+  if (o.volumeGain !== 0) af.push(`volume=${o.volumeGain}dB`);
+  if (o.normalize) af.push(`loudnorm=I=${o.loudnormI}`);
+  if (o.silenceRemove) {
+    // 前后各过一次 silenceremove 并反转，去掉首尾静音段
+    af.push(
+      "silenceremove=start_periods=1:start_duration=0:start_threshold=-50dB:detection=peak,aformat=dblp,areverse,silenceremove=start_periods=1:start_duration=0:start_threshold=-50dB:detection=peak,aformat=dblp,areverse"
+    );
+  }
+  return af;
+}
+
+export function buildAudio(o: AudioOpts): string {
+  const fmt = o.outFmt || "mp3";
+  const enc = AUDIO_ONLY_FMT[fmt] || "aac";
+  const qualityArgs = audioQualityArgs(fmt, o.quality || "standard");
+  const sampleArgs = o.sampleRate > 0 ? [`-ar ${o.sampleRate}`] : [];
+
+  if (o.mode === "concat") {
+    if (!o.files.length) return ffmpegCmd(`（请先选择要拼接的音频文件）`);
+    const inputs = o.files.map((f) => `-i ${q(f)}`).join(" ");
+    const seg = o.files.map((_, i) => `[${i}:a]`).join("");
+    const b = baseName(o.files[0]).replace(/\.[^./\\]+$/, "") || "merged";
+    const out = outArg(`${b}.merged.${fmt}`);
+    // 先 concat 出单路 [cat]，再把处理滤镜（淡入/音量/响度…）链接在尾部输出 [out]，
+    // 让拼接结果整体过一遍处理，而不是被静默丢弃。
+    const af = buildAudioFilters(o);
+    const fc = af.length
+      ? `${seg}concat=n=${o.files.length}:v=0:a=1[cat],[cat]${af.join(",")}[out]`
+      : `${seg}concat=n=${o.files.length}:v=0:a=1[out]`;
+    const parts = [
+      inputs,
+      `-filter_complex "${fc}"`,
+      `-map "[out]"`,
+      ...sampleArgs,
+      `-c:a ${enc}`,
+      ...qualityArgs,
+    ];
+    if (o.channels > 0) parts.push(`-ac ${o.channels}`);
+    parts.push(out);
+    return ffmpegCmd(parts.join(" "));
+  }
+
+  const base = baseName(o.input).replace(/\.[^./\\]+$/, "") || "output";
+  const parts = [`-i ${q(o.input)}`, "-vn"];
+  const af = buildAudioFilters(o);
+  if (af.length) parts.push(`-af "${af.join(",")}"`);
+  parts.push(...sampleArgs);
+  if (o.channels > 0) parts.push(`-ac ${o.channels}`);
+  parts.push(`-c:a ${enc}`, ...qualityArgs, outArg(`${base}.audio.${fmt}`));
+  return ffmpegCmd(parts.join(" "));
 }

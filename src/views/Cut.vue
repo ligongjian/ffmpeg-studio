@@ -10,7 +10,7 @@ import SegGroup from "../components/SegGroup.vue";
 /** 入点与出点之间的最小间隔（秒） */
 const MIN_SPAN = 1;
 
-const s = reactive({ start: "00:00:25", end: "00:02:30", dur: "00:02:05", mode: "re" });
+const s = reactive({ start: "00:00:25", end: "00:02:30", dur: "00:02:05", mode: "re", splitMode: "clip", segCount: 3, segDur: 60 });
 
 // ===== 真实总长 =====
 // 原来总长写死成 00:04:12，拖到哪儿都是假的。现在选中输入文件后向后端探测，
@@ -95,16 +95,34 @@ const inputName = computed(() => store.inputFile || "input.mp4");
 // 输出文件名：沿用源 basename 保持 .mp4；源本身是 mp4 时追加 .clip 防自覆盖
 const outputName = computed(() => {
   const base = baseName(inputName.value).replace(/\.[^./\\]+$/, "") || "output";
+  if (s.splitMode !== "clip") return `${base}.part.%03d.mp4`;
   return /\.mp4$/i.test(inputName.value) ? `${base}.clip.mp4` : `${base}.mp4`;
 });
-const cmd = computed(() =>
-  buildCut({
+const cmd = computed(() => {
+  const tv = total.value ?? 0;
+  return buildCut({
     input: inputName.value,
     start: s.start,
     end: s.end,
     mode: s.mode as "re" | "copy",
-  })
-);
+    split:
+      s.splitMode === "equal"
+        ? { type: "equal", segDur: tv > 0 ? tv / Math.max(1, s.segCount) : s.segDur, count: s.segCount }
+        : s.splitMode === "segment"
+        ? { type: "segment", segDur: s.segDur }
+        : undefined,
+  });
+});
+
+/** 拆分模式预计切出的段数（展示用） */
+const plannedCount = computed(() => {
+  if (s.splitMode === "clip") return 1;
+  const tv = total.value ?? 0;
+  const d = s.splitMode === "equal" ? (tv > 0 ? tv / Math.max(1, s.segCount) : s.segDur) : s.segDur;
+  if (d <= 0 || !isFinite(d)) return 0;
+  const totalDur = tv > 0 ? tv : Math.max(0, hms2s(s.end) - hms2s(s.start));
+  return Math.max(1, Math.ceil(totalDur / d));
+});
 
 // ===== 拖拽：入点手柄 / 出点手柄 / 整块平移 =====
 type DragMode = "in" | "out" | "move";
@@ -242,6 +260,19 @@ function normalize() {
 
       <div class="text-xs text-muted">输出文件：<span class="text-brand font-mono">{{ outputName }}</span></div>
 
+      <div>
+        <div class="text-sm font-semibold mb-2">模式</div>
+        <SegGroup
+          v-model="s.splitMode"
+          :options="[
+            { value: 'clip', label: '单段裁剪' },
+            { value: 'equal', label: '等分拆分' },
+            { value: 'segment', label: '按时长拆分' },
+          ]"
+        />
+      </div>
+
+      <div v-if="s.splitMode === 'clip'" class="space-y-4">
       <div class="flex items-center justify-between">
         <h3 class="font-semibold">时间轴剪辑</h3>
         <span class="text-xs text-muted">
@@ -398,8 +429,28 @@ function normalize() {
         </div>
       </div>
 
+      </div>
+
+      <div v-else class="space-y-4">
+        <div class="grid md:grid-cols-2 gap-4">
+          <div v-if="s.splitMode === 'equal'">
+            <label class="text-xs text-muted">等分段数</label>
+            <input type="number" min="2" step="1" v-model.number="s.segCount" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" />
+          </div>
+          <div v-else>
+            <label class="text-xs text-muted">每段时长（秒）</label>
+            <input type="number" min="1" step="1" v-model.number="s.segDur" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" />
+          </div>
+        </div>
+        <p class="text-[11px] text-muted">
+          将按约 <span class="text-brand font-semibold">{{ plannedCount }}</span> 段输出
+          <span class="text-brand font-mono">{{ outputName }}</span>。
+          采用 segment muxer；-c copy 为快速切分（可能落在非关键帧处），重编码更精确。
+        </p>
+      </div>
+
       <div class="flex items-center gap-2 mt-4">
-        <span class="text-xs text-muted">模式</span>
+        <span class="text-xs text-muted">编码</span>
         <SegGroup
           v-model="s.mode"
           :options="[

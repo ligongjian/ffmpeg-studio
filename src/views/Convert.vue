@@ -8,6 +8,7 @@ import {
   supportsFaststart,
   AUDIO_ONLY_FMT,
   FMT_OPTIONS,
+  HWACCEL_ENCODERS,
 } from "../lib/ffmpeg";
 import { baseName } from "../lib/format";
 import CommandCard from "../components/CommandCard.vue";
@@ -21,6 +22,7 @@ const s = reactive({
   faststart: true,
   deint: false,
   norm: false,
+  hwaccel: "",
 });
 
 const audioOnly = computed(() => isAudioOnly(store.fmt));
@@ -66,8 +68,12 @@ const cmd = computed(() =>
     faststart: s.faststart,
     deint: s.deint,
     norm: s.norm,
+    hwaccel: s.hwaccel,
   })
 );
+
+// 硬件加速只对"真正重编码的视频"有意义（纯音频 / GIF / 直接拷贝都不适用）
+const hwaccelUsable = computed(() => !audioOnly.value && !videoOnly.value && s.enc !== "copy");
 </script>
 
 <template>
@@ -144,6 +150,22 @@ const cmd = computed(() =>
           </select>
           <p v-if="videoOnly" class="mt-1 text-xs text-muted">GIF 没有音轨</p>
         </div>
+      </div>
+
+      <div>
+        <label class="text-xs text-muted">硬件加速编码（可选，需对应显卡驱动）</label>
+        <select
+          v-model="s.hwaccel"
+          :disabled="!hwaccelUsable"
+          class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none"
+          :class="hwaccelUsable ? '' : 'opacity-50 cursor-not-allowed'"
+        >
+          <option v-for="e in HWACCEL_ENCODERS" :key="e.value" :value="e.value">{{ e.label }}</option>
+        </select>
+        <p v-if="!hwaccelUsable" class="mt-1 text-xs text-muted">纯音频 / GIF / 直接拷贝时无需硬件加速</p>
+        <p v-else-if="s.hwaccel" class="mt-1 text-xs text-muted">
+          已选用 {{ HWACCEL_ENCODERS.find((e) => e.value === s.hwaccel)?.label }}，质量参数按 CRF 映射到 -cq / -global_quality。
+        </p>
       </div>
 
       <div>

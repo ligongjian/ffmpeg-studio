@@ -9,7 +9,18 @@ const QUICK: [string, string][] = [
   ["流媒体", "stream"], ["批量处理", "batch"],
 ];
 
-const queueCount = computed(() => store.tasks.length);
+// 真实统计：全部基于 store.tasks 实时聚合（原先的「24 任务 / 3.2h / 8.4GB」是写死的假数字）
+function isSameDay(ts: number, ref: Date): boolean {
+  const d = new Date(ts);
+  return d.getFullYear() === ref.getFullYear() && d.getMonth() === ref.getMonth() && d.getDate() === ref.getDate();
+}
+const today = new Date();
+const doneToday = computed(
+  () => store.tasks.filter((t) => t.status === "done" && t.finishedAt && isSameDay(t.finishedAt, today)).length
+);
+const runningCount = computed(() => store.tasks.filter((t) => t.status === "running").length);
+const queuedCount = computed(() => store.tasks.filter((t) => t.status === "queued").length);
+const failedCount = computed(() => store.tasks.filter((t) => t.status === "failed").length);
 
 // 拖放区：Tauri 在 webview 层拦截了系统文件拖拽，只能经由 onDragDropEvent 拿到真实路径
 const zone = ref<HTMLElement | null>(null);
@@ -51,24 +62,24 @@ onUnmounted(() => {
   <div class="space-y-6">
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
       <div class="card rounded-2xl p-4">
-        <div class="text-xs text-muted">今日任务</div>
-        <div class="text-2xl font-extrabold mt-1">24</div>
-        <div class="text-xs text-brand mt-1">↑ 较昨日 +12%</div>
+        <div class="text-xs text-muted">今日完成</div>
+        <div class="text-2xl font-extrabold mt-1">{{ doneToday }}</div>
+        <div class="text-xs text-brand mt-1">已完成任务</div>
       </div>
       <div class="card rounded-2xl p-4">
-        <div class="text-xs text-muted">处理时长</div>
-        <div class="text-2xl font-extrabold mt-1">3.2<span class="text-base font-semibold">h</span></div>
-        <div class="text-xs text-muted mt-1">平均 8 分/任务</div>
-      </div>
-      <div class="card rounded-2xl p-4">
-        <div class="text-xs text-muted">节省空间</div>
-        <div class="text-2xl font-extrabold mt-1">8.4<span class="text-base font-semibold">GB</span></div>
-        <div class="text-xs text-brand mt-1">压缩率 61%</div>
+        <div class="text-xs text-muted">进行中</div>
+        <div class="text-2xl font-extrabold mt-1">{{ runningCount }}</div>
+        <div class="text-xs text-muted mt-1">正在编码</div>
       </div>
       <div class="card rounded-2xl p-4">
         <div class="text-xs text-muted">队列中</div>
-        <div class="text-2xl font-extrabold mt-1">{{ queueCount }}</div>
-        <div class="text-xs text-muted mt-1">点左侧「任务队列」或右上铃铛查看</div>
+        <div class="text-2xl font-extrabold mt-1">{{ queuedCount }}</div>
+        <div class="text-xs text-muted mt-1">等待开始</div>
+      </div>
+      <div class="card rounded-2xl p-4">
+        <div class="text-xs text-muted">失败</div>
+        <div class="text-2xl font-extrabold mt-1" :class="failedCount ? 'text-red-400' : ''">{{ failedCount }}</div>
+        <div class="text-xs text-muted mt-1">需重试 / 处理</div>
       </div>
     </div>
 
