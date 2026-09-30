@@ -219,23 +219,89 @@ export function buildConcatList(files: string[]): string {
 export interface ExtractOpts {
   tab: "audio" | "video" | "frame" | "thumb";
   input: string;
+  /** 音频：copy / aac / mp3 / flac / opus */
+  audioCodec: string;
+  /** 音频输出码率（如 "192k"），空则交给编码器默认 */
+  audioBitrate: string;
+  /** 视频：copy / libx264 */
+  videoCodec: string;
+  /** 视频 CRF，仅 videoCodec !== "copy" 时生效 */
+  videoCrf: string;
+  /** 视频容器：mp4 / mkv / mov / avi / webm */
+  videoFmt: string;
+  /** 单帧时间点，如 "00:00:10" 或 "10" 或 "0.5" */
+  frameAt: string;
+  /** 单帧格式：png / jpg */
+  frameFmt: string;
+  /** 缩略图间隔秒；0 = 关闭（单张封面） */
+  thumbInterval: number;
+  /** 缩略图宽度，如 320；高度自动按比例 */
+  thumbWidth: number;
+  /** 缩略图命名模板，如 thumb_%03d.png */
+  thumbName: string;
 }
 
 export function buildExtract(o: ExtractOpts): string {
+  const base = baseName(o.input).replace(/\.[^./\\]+$/, "") || "output";
+  const out = `${base}.extracted`;
   let body = "";
   switch (o.tab) {
-    case "audio":
-      body = `-i ${q(o.input)} -vn -c:a copy output.m4a`;
+    case "audio": {
+      // 无损拷贝 → 容器跟随原编码（aac→m4a, mp3→mp3, flac→flac, opus→opus, 其它→wav）
+      // 重编码 → 容器按所选编码
+      const extMap: Record<string, string> = {
+        aac: "m4a",
+        mp3: "mp3",
+        flac: "flac",
+        opus: "opus",
+        copy: "wav",
+      };
+      const ext = extMap[o.audioCodec] ?? "m4a";
+      const outName = `${out}.${ext}`;
+      const parts = [`-i ${q(o.input)}`, "-vn"];
+      if (o.audioCodec === "copy") {
+        parts.push("-c:a copy");
+      } else {
+        parts.push(`-c:a ${o.audioCodec}`);
+        if (o.audioBitrate) parts.push(`-b:a ${o.audioBitrate}`);
+      }
+      parts.push(outArg(outName));
+      body = parts.join(" ");
       break;
-    case "video":
-      body = `-i ${q(o.input)} -an -c:v copy output.mp4`;
+    }
+    case "video": {
+      const parts = [`-i ${q(o.input)}`, "-an"];
+      if (o.videoCodec === "copy") {
+        parts.push("-c:v copy");
+      } else {
+        parts.push(`-c:v libx264 -crf ${o.videoCrf || 23}`);
+      }
+      parts.push(outArg(`${out}.${o.videoFmt || "mp4"}`));
+      body = parts.join(" ");
       break;
-    case "frame":
-      body = `-i ${q(o.input)} -ss 00:00:05 -frames:v 1 frame.png`;
+    }
+    case "frame": {
+      const parts = [`-i ${q(o.input)}`, `-ss ${o.frameAt || "0"}`, "-frames:v 1"];
+      // jpg 需要指定质量；png 是默认无损
+      if (o.frameFmt === "jpg") {
+        parts.push("-q:v 2");
+      }
+      parts.push(outArg(`${out}.${o.frameFmt === "jpg" ? "jpg" : "png"}`));
+      body = parts.join(" ");
       break;
-    case "thumb":
-      body = `-i ${q(o.input)} -vf fps=1/10 thumb_%03d.png`;
+    }
+    case "thumb": {
+      const parts = [`-i ${q(o.input)}`];
+      const vf: string[] = [];
+      if (o.thumbInterval > 0) vf.push(`fps=1/${o.thumbInterval}`);
+      if (o.thumbWidth > 0) vf.push(`scale=${o.thumbWidth}:-1`);
+      if (vf.length) parts.push(`-vf ${vf.join(",")}`);
+      // 单张封面时不带 %03d，否则 ffmpeg 会输出 thumb_000.png 这种带序号的文件
+      const tpl = o.thumbInterval === 0 ? o.thumbName.replace(/%0\d+d/, "000") : o.thumbName;
+      parts.push(outArg(`${base}_${tpl}`));
+      body = parts.join(" ");
       break;
+    }
   }
   return ffmpegCmd(body);
 }
@@ -243,12 +309,36 @@ export function buildExtract(o: ExtractOpts): string {
 export interface WatermarkOpts {
   tab: "image" | "text" | "sub";
   input: string;
+  /** 水印图片路径（tab=image 时用） */
+  image?: string;
   pos?: string; // 左上/右上/左下/右下/居中
   opacity?: number; // 0..100
+  /** 水印缩放：相对源视频宽度的百分比，如 20 = 占宽度的 20% */
+  scale?: number;
   text?: string;
   fontsize?: number;
   color?: string;
+  /** 文字水印阴影/描边 */
+  shadow?: boolean;
+  /** 文字水印字体文件路径；空则用系统默认（Windows: 微软雅黑） */
+  fontfile?: string;
+  /** 字幕文件路径 */
+  sub?: string;
+  /** 字幕字体大小（按源视频高度百分比，0 = 默认） */
+  subFontsize?: number;
+  /** 字幕输出容器 */
+  fmt?: string;
 }
+
+/**
+ * Windows 默认中文字体（微软雅黑）。
+ *
+ * 本机这个 ffmpeg 构建（msvc，带 `--enable-fontconfig`）加载不到 fontconfig 配置文件，
+ * 字体回退是失效的（日志里 `Fontconfig error: Cannot load default config file`
+ * → `Cannot find a valid font for the family Sans`），所以 fontfile 必须给对，
+ * 给错不会有任何兜底。
+ */
+const WIN_FONT = "C:\\Windows\\Fonts\\msyh.ttc";
 
 const WM_POS: Record<string, string> = {
   左上: "10:10",
@@ -258,55 +348,240 @@ const WM_POS: Record<string, string> = {
   居中: "(W-w)/2:(H-h)/2",
 };
 
+/**
+ * 把本地路径放进 ffmpeg **滤镜参数**时要过的转义。
+ *
+ * 实测（ffmpeg 7.1 / msvc）：一个选项值要连着过两层解转义——
+ *   ① filtergraph 分词：终止符是 `[ ] , ;`，`\X` → `X`，并且**会剥掉成对单引号**
+ *      （引号内的字符原样保留，不再解转义）；
+ *   ② 滤镜选项解析：键值/选项分隔符都是 `:`，同样 `\X` → `X`。
+ * 所以想让它最终看到字面 `:`（Windows 盘符），命令里必须写两个反斜杠；而反斜杠
+ * 自己会被吃两层，路径分隔符就一律换成 `/`。
+ *
+ * 这里用「单引号包裹 + 单层 `\:`」：引号挡掉第①层，第②层再把 `\` 消掉，
+ * freetype / libass 拿到的就是干净的 `C:/Windows/Fonts/msyh.ttc`。
+ * 该写法在 CMD、PowerShell、Git Bash 里直接粘贴也能跑；路径里真的含 `'` 时
+ * 退回无引号的双反斜杠写法（`\\:`），代价是 Git Bash 下粘贴会多掉一层。
+ */
+function filterPath(p: string): string {
+  const fwd = p.replace(/\\/g, "/");
+  if (!fwd.includes("'")) return `'${fwd.replace(/:/g, "\\:")}'`;
+  return fwd.replace(/:/g, "\\\\:");
+}
+
+/**
+ * drawtext 的 text 值：外面包单引号挡掉第①层，内部再按第②层转义。
+ *
+ * `'` 不能写成 `\'`——单引号会被提前闭合，把整个滤镜链拆散（实测报
+ * `No option name near ...`）；改成中西文都能用的右单引号 `’`。
+ * `%` 不用动，配合下面的 `expansion=none` 它就是个普通字符。
+ */
+function filterText(s: string): string {
+  const esc = s.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "\u2019");
+  return `'${esc}'`;
+}
+
 export function buildWatermark(o: WatermarkOpts): string {
+  const base = baseName(o.input).replace(/\.[^./\\]+$/, "") || "output";
+  const fmt = o.fmt || "mp4";
+  const out = outArg(`${base}.watermarked.${fmt}`);
+
   if (o.tab === "image") {
+    if (!o.image) {
+      // 没选图片时给个能跑的占位（避免用户复制命令时报错）
+      return ffmpegCmd(`（请先选择水印图片）`);
+    }
     const p = WM_POS[o.pos || "右下"] || WM_POS["右下"];
     const a = ((o.opacity ?? 100) / 100).toFixed(2);
+    const scalePct = o.scale && o.scale > 0 ? o.scale : 20;
+    // 水印按源宽度比例缩放；aa 是 alpha 系数
+    const filter = `[1:v]scale=iw*${scalePct}/100:ih*${scalePct}/100,colorchannelmixer=aa=${a}[w];[0:v][w]overlay=${p}:shortest=1[v]`;
     return ffmpegCmd(
-      `-i ${q(o.input)} -i logo.png -filter_complex "[1]colorchannelmixer=aa=${a}[w];[0][w]overlay=${p}" out.mp4`
+      `-i ${q(o.input)} -i ${q(o.image)} -filter_complex "${filter}" -map "[v]" -map 0:a? -c:a copy ${out}`
     );
   }
   if (o.tab === "text") {
-    const t = (o.text || "Demo").replace(/'/g, "'\\''");
     const fs = o.fontsize || 28;
     const color = o.color || "white";
+    const p = WM_POS[o.pos || "左上"] || WM_POS["左上"];
+    const [x, y] = p.split(":");
+
+    const parts: string[] = [
+      `text=${filterText(o.text || "Demo")}`,
+      // 关掉 drawtext 的 `%{...}` 展开：界面上填的就是字面文字，不关的话
+      // "50% off" 这类内容会被当成展开式，直接渲染成一片空白（实测）。
+      "expansion=none",
+      `x=${x}`,
+      `y=${y}`,
+      `fontsize=${fs}`,
+      `fontcolor=${color}`,
+      // 用户没选字体时用系统默认（WIN_FONT 是原始 Windows 路径，交给 filterPath 转义）
+      `fontfile=${filterPath(o.fontfile || WIN_FONT)}`,
+    ];
+    if (o.shadow) {
+      parts.push("shadowx=2", "shadowy=2", "borderw=0");
+    }
+    const filter = `drawtext=${parts.join(":")}`;
     return ffmpegCmd(
-      `-i ${q(o.input)} -vf "drawtext=text='${t}':x=20:y=20:fontsize=${fs}:fontcolor=${color}" out.mp4`
+      `-i ${q(o.input)} -vf "${filter}" -map 0:v -map 0:a? -c:a copy ${out}`
     );
   }
-  return ffmpegCmd(`-i ${q(o.input)} -vf "subtitles=sub.srt" out.mp4`);
+  // 硬字幕：直接烧进画面；需要 libass 编译（ffmpeg 官方二进制都有）
+  if (!o.sub) {
+    return ffmpegCmd(`（请先选择字幕文件）`);
+  }
+  // 注意：subtitles 的路径同样要走 filterPath（正斜杠 + 转义盘符冒号）。
+  // 旧写法 `C\:/...` 会被第①层解转义成 `C:/...`，冒号随即被当选项分隔符，
+  // 报 `Unable to parse option value "..." as image size`。
+  const sizeFilter = o.subFontsize && o.subFontsize > 0 ? `:force_style=Fontsize=${o.subFontsize}` : "";
+  return ffmpegCmd(
+    `-i ${q(o.input)} -vf "subtitles=${filterPath(o.sub)}${sizeFilter}" -map 0:v -map 0:a? -c:a copy ${out}`
+  );
 }
 
+/**
+ * 滤镜调色页的状态：每个滤镜一个开关 + 一组可调参数。
+ * 参数全部用 number/string 显式持有，UI 调多少就提交多少，不再硬编码默认值。
+ */
 export interface FiltersOpts {
-  active: Record<string, boolean>;
-  custom: string;
+  input: string;
+  fmt: string;
+  /** 视频编码器；有视频滤镜时必然重编码 */
+  vEnc: string;
+  /** 视频 CRF */
+  crf: number;
+  /** 音频动作：copy = 原样拷贝；loudnorm = 响度归一；mute = 去声 */
+  audioMode: "copy" | "loudnorm" | "mute";
+  /** 归一化目标响度（LUFS），audioMode=loudnorm 时用 */
+  loudnormI: number;
+
+  scaleOn: boolean;
+  scaleW: number;
+  scaleH: number;
+  cropOn: boolean;
+  cropW: number;
+  cropH: number;
+  cropX: number;
+  cropY: number;
+  rotateOn: boolean;
+  rotateDir: number; // 0/1/2/3 = transpose，1=顺时针90°，2=180°，3=逆时针90°
+  eqOn: boolean;
+  eqBrightness: number;
+  eqContrast: number;
+  eqSaturation: number;
+  eqGamma: number;
+  denoiseOn: boolean;
+  sharpenOn: boolean;
+  sharpenLuma: number;
+  sharpenThresh: number;
+  fadeOn: boolean;
+  fadeIn: boolean;
+  fadeOut: boolean;
+  fadeDur: number;
+  fadeOutStart: number;
+  deintOn: boolean;
+  volumeOn: boolean;
+  volumeGain: number;
+
+  /** 自定义视频滤镜链（高级），逗号分隔，追加到 -vf 末尾 */
+  customVf: string;
+  /** 自定义音频滤镜链（高级），追加到 -af 末尾 */
+  customAf: string;
 }
 
-const FILTER_LIB: [string, string, string][] = [
-  ["scale", "缩放", "scale=1280:720"],
-  ["crop", "裁剪", "crop=1000:600:140:60"],
-  ["rotate", "旋转90°", "transpose=1"],
-  ["eq", "调色", "eq=brightness=0.05:contrast=1.1"],
-  ["denoise", "降噪", "hqdn3d"],
-  ["sharpen", "锐化", "unsharp=5:5:1.2"],
-  ["fade", "淡入淡出", "fade=t=in:st=0:d=1"],
-  ["deint", "去隔行", "yadif"],
-  ["volume", "音量", "volume=1.3"],
-  ["loudnorm", "响度归一", "loudnorm=I=-16"],
-];
-
-export function buildFilters(o: FiltersOpts, input = "input.mp4"): string {
-  const chain = FILTER_LIB.filter(([k]) => o.active[k]).map(([, , f]) => f);
-  const cf = o.custom.trim();
-  if (cf) chain.push(cf);
-  // 没选滤镜时就是原样转封装。（原来这里拼了个 `# 未选择滤镜` 注释，
-  // 后端按整个字符串拆参数执行时会被当成真实参数传给 ffmpeg。）
-  if (!chain.length) return ffmpegCmd(`-i ${q(input)} -c copy output.mp4`);
-  return ffmpegCmd(`-i ${q(input)} -vf "${chain.join(",")}" output.mp4`);
+/**
+ * 拼接单个 eq（调色）滤镜。brightness 范围 -1..1（0 为正常），
+ * contrast/saturation/gamma 以 1 为正常值。
+ */
+function buildEq(o: FiltersOpts): string {
+  return `eq=brightness=${o.eqBrightness}:contrast=${o.eqContrast}:saturation=${o.eqSaturation}:gamma=${o.eqGamma}`;
 }
 
-export function filterList() {
-  return FILTER_LIB;
+/** 缩放滤镜；H=0 表示按原比例自动算高度 */
+function buildScale(o: FiltersOpts): string {
+  const h = o.scaleH <= 0 ? "-2" : String(o.scaleH);
+  return `scale=${o.scaleW}:${h}`;
+}
+
+/** 旋转：transpose 的 dir 1=顺时针90°、2=180°、3=逆时针90° */
+function buildRotate(o: FiltersOpts): string {
+  return `transpose=${o.rotateDir}`;
+}
+
+/** 裁剪 */
+function buildCrop(o: FiltersOpts): string {
+  return `crop=${o.cropW}:${o.cropH}:${o.cropX}:${o.cropY}`;
+}
+
+/**
+ * 锐化：unsharp=luma_msize_x:luma_msize_y:luma_amount[:luma_threshold]
+ * 这里 ms 用 5x5，amount 是锐化强度，threshold 高于此差异才锐化（默认 0=全部）。
+ */
+function buildSharpen(o: FiltersOpts): string {
+  const t = o.sharpenThresh > 0 ? `:0:${o.sharpenThresh}` : "";
+  return `unsharp=5:5:${o.sharpenLuma}${t}`;
+}
+
+/** 淡入淡出。st（开始时间）以秒计；淡出的 st 由用户给定，通常=视频时长-淡出时长 */
+function buildFade(o: FiltersOpts, duration: number): string[] {
+  const chain: string[] = [];
+  if (o.fadeIn) chain.push(`fade=t=in:st=0:d=${o.fadeDur}`);
+  if (o.fadeOut) {
+    const st = duration > 0 ? Math.max(0, duration - o.fadeDur).toFixed(3) : "0";
+    chain.push(`fade=t=out:st=${st}:d=${o.fadeDur}`);
+  }
+  return chain;
+}
+
+/** 降噪 hqdn3d（luma_spatial:chroma_spatial:luma_tmp:chroma_tmp，默认值即合理） */
+function buildDenoise(): string {
+  return "hqdn3d";
+}
+
+export function buildFilters(o: FiltersOpts): string {
+  const vf: string[] = [];
+  if (o.scaleOn) vf.push(buildScale(o));
+  if (o.cropOn) vf.push(buildCrop(o));
+  if (o.rotateOn) vf.push(buildRotate(o));
+  if (o.eqOn) vf.push(buildEq(o));
+  if (o.denoiseOn) vf.push(buildDenoise());
+  if (o.sharpenOn) vf.push(buildSharpen(o));
+  if (o.fadeOn) vf.push(...buildFade(o, o.fadeOutStart));
+  if (o.deintOn) vf.push("yadif");
+  const cfV = o.customVf.trim();
+  if (cfV) vf.push(cfV);
+
+  // 音频滤镜链
+  const af: string[] = [];
+  if (o.volumeOn) af.push(`volume=${o.volumeGain}`);
+  if (o.audioMode === "loudnorm") af.push(`loudnorm=I=${o.loudnormI}`);
+  const cfA = o.customAf.trim();
+  if (cfA) af.push(cfA);
+
+  // 输出文件名沿用源 basename，保持所选容器扩展名；
+  // 源容器与目标同名时追加 `.filtered` 避免自覆盖。
+  const base = baseName(o.input).replace(/\.[^./\\]+$/, "") || "output";
+  const srcExt = (o.input.match(/\.[^./\\]+$/) || [""])[0].toLowerCase().replace(".", "");
+  const outName = srcExt === o.fmt ? `${base}.filtered.${o.fmt}` : `${base}.${o.fmt}`;
+
+  const parts: string[] = [`-i ${q(o.input)}`];
+  // 有视频滤镜才重编码；否则 copy 更省事且不丢质量
+  if (vf.length) {
+    parts.push(`-vf "${vf.join(",")}"`);
+    parts.push(`-c:v ${o.vEnc} -crf ${o.crf}`);
+  } else {
+    parts.push("-c:v copy");
+  }
+  if (o.audioMode === "mute") {
+    parts.push("-an");
+  } else if (af.length) {
+    parts.push(`-af "${af.join(",")}"`);
+    parts.push("-c:a aac");
+  } else {
+    parts.push("-c:a copy");
+  }
+  parts.push(outArg(outName));
+  return ffmpegCmd(parts.join(" "));
 }
 
 export interface RecordOpts {
