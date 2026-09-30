@@ -657,6 +657,22 @@ pub fn write_concat_list(dir: String, files: Vec<String>) -> Result<String, Stri
     Ok(list_path.to_string_lossy().into_owned())
 }
 
+/// 未指定工作目录时的兜底输出目录：用户「视频」文件夹。
+/// 拉流录制这类没有本地输入文件的场景，前端给不出 cwd —— 此时把相对输出路径
+/// 落到用户可预期、可写的位置，而不是应用进程的当前目录。
+fn default_output_dir() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("USERPROFILE")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())?;
+    let dir = base.join("Videos");
+    if std::fs::create_dir_all(&dir).is_ok() {
+        Some(dir)
+    } else {
+        // 「视频」不可用时退回用户根目录（至少是可写的）
+        Some(base)
+    }
+}
+
 /// Spawn an ffmpeg process for `cmd`, stream progress to the frontend, support cancel.
 #[tauri::command]
 pub fn run_ffmpeg(
@@ -684,14 +700,31 @@ pub fn run_ffmpeg(
         input_args.insert(0, if overwrite { "-y".into() } else { "-n".into() });
     }
 
-    let duration = first_input(&input_args).as_ref().and_then(|f| probe_duration(f, &ffprobe));
+    // 只对「确实存在的本地文件」探测时长。
+    // 推流/拉流场景下 `-i` 后面跟的是网络地址（rtmp/rtsp/http），把它交给 ffprobe 会长时间阻塞
+    // —— 实测不可达的 RTSP 地址能卡住 60s 以上（RTMP 约 6s）。更麻烦的是这段阻塞发生在 child
+    // 注册进 state.running 之前：任务既没真正开始跑，又因为找不到进程而无法取消
+    // （cancel_ffmpeg 返回「未找到运行中的任务」），前端会一直停在「运行中」。
+    // 网络流本来也没有固定时长，跳过探测后走「不确定进度」分支即可。
+    let duration = match first_input(&input_args) {
+        Some(f) if std::path::Path::new(&f).exists() => probe_duration(&f, &ffprobe),
+        _ => None,
+    };
 
     let mut command = Command::new(&bin);
     command.args(&input_args);
     command.stdin(Stdio::null());
     command.stdout(Stdio::null());
     command.stderr(Stdio::piped());
-    if let Some(dir) = &cwd {
+    // 指定了工作目录就用它；没有指定（如拉流录制没有本地输入文件）则兜底到「视频」文件夹。
+    // 不兜底的话相对输出路径会落到应用进程的当前目录——开发时是 src-tauri，安装后可能是
+    // 只读的程序目录，用户既找不到文件也可能直接写失败。
+    let work_dir = cwd
+        .as_deref()
+        .filter(|d| !d.trim().is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(default_output_dir);
+    if let Some(dir) = work_dir {
         command.current_dir(dir);
     }
 

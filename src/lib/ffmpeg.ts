@@ -604,22 +604,128 @@ export function buildRecord(o: RecordOpts): string {
   );
 }
 
+export type StreamMode = "push" | "pull";
+export type StreamProto = "RTMP" | "HLS" | "RTSP" | "HTTP-FLV";
+
 export interface StreamOpts {
-  mode: "push" | "pull";
-  proto: string;
+  mode: StreamMode;
+  /** 推流时决定输出封装；拉流时决定读取方式与输出 */
+  proto: StreamProto;
   url: string;
+  /** 视频码率，如 "4000k" */
   vbr: string;
+  /** 音频码率，如 "128k" */
   abr: string;
+  /** x264 编码速度（直播用很快的档位降低延迟） */
+  preset: string;
+  /** 输出分辨率，如 "1280:720"；空=跟随源（不缩放） */
+  scale: string;
+  /** 输出帧率，如 "30"；空=跟随源 */
+  fps: string;
+  /** 关键帧间隔（秒），用于 HLS/RTMP 平滑切片与快速起播；0=不强制 */
+  gopSec: number;
+  /** 是否包含音频流；false → -an */
+  audio: boolean;
+  /** 拉流录制是否转码（false=直接拷贝 -c copy，true=重编码为 H.264/AAC） */
+  transcode: boolean;
+  /** 推流源文件路径（pull 模式用不到） */
   input: string;
+  /**
+   * 拉流输出文件名，含扩展名（如 `pull_20260930_210000.ts`），仅 pull 使用。
+   *
+   * 容器由扩展名决定（ts→mpegts / mkv→matroska / mp4→mp4），所以不需要单独的容器字段。
+   * 由调用方生成：默认带时间戳，避免每次拉流都写同一个文件（`-y` 会静默覆盖上一份，
+   * 关掉覆盖则第二次直接失败）。
+   */
+  outName: string;
+}
+
+/** 推流输出封装：RTMP/HTTP-FLV 都是 flv 封装；HLS→hls；RTSP→rtsp */
+function pushFormat(proto: StreamProto): string {
+  if (proto === "HLS") return "hls";
+  if (proto === "RTSP") return "rtsp";
+  return "flv";
+}
+
+/** 把码率字符串翻倍作为 bufsize（平稳码率用），解析失败返回空 */
+function bufsizeFor(br: string): string {
+  const m = br.trim().match(/^(\d+(?:\.\d+)?)\s*([kKmMgG]?)$/);
+  if (!m) return "";
+  const n = (parseFloat(m[1]) * 2).toString();
+  return `${n}${m[2].toLowerCase()}`;
 }
 
 export function buildStream(o: StreamOpts): string {
-  if (o.mode === "push")
-    return ffmpegCmd(
-      `-re -i ${q(o.input)} -c:v libx264 -b:v ${o.vbr} -c:a aac -b:a ${o.abr} -f flv ${o.url}`
+  return o.mode === "push" ? buildPush(o) : buildPull(o);
+}
+
+/** 推流：把本地文件实时推送到 RTMP/HLS/RTSP/HTTP-FLV 服务器 */
+function buildPush(o: StreamOpts): string {
+  const parts: string[] = [`-re -i ${q(o.input)}`];
+  const vf: string[] = [];
+  if (o.scale) vf.push(`scale=${o.scale}`);
+
+  // 视频：H.264 + yuv420p（RTMP/HLS 服务器与播放器普遍只认 4:2:0；
+  // 不给 -pix_fmt 时 x264 会按源选 yuv444p，多数服务器直接拒收/播放器打不开）
+  parts.push(`-c:v libx264 -preset ${o.preset} -b:v ${o.vbr} -pix_fmt yuv420p`);
+  if (o.fps) parts.push(`-r ${o.fps}`);
+  if (vf.length) parts.push(`-vf "${vf.join(",")}"`);
+
+  // 关键帧间隔：让 HLS 切片均匀、播放器快速起播（无关键帧时按场景切换，切片会忽大忽小）
+  if (o.gopSec > 0) {
+    const fps = o.fps ? Number(o.fps) : 30;
+    if (Number.isFinite(fps) && fps > 0) {
+      parts.push(`-g ${Math.max(1, Math.round(fps * o.gopSec))}`);
+    }
+  }
+
+  // 平稳码率：bufsize ≈ 2× 码率，避免直播卡顿；解析失败则不附加
+  const buf = bufsizeFor(o.vbr);
+  if (buf) parts.push(`-maxrate ${o.vbr} -bufsize ${buf}`);
+
+  // 音频：源无音轨时 -c:a aac 会报错，提供开关用 -an 跳过
+  if (o.audio) {
+    parts.push(`-c:a aac -b:a ${o.abr}`);
+  } else {
+    parts.push(`-an`);
+  }
+
+  // 封装相关选项必须在输出 URL 之前
+  if (o.proto === "HLS") {
+    // HLS 输出：固定切片时长、保留全部切片
+    parts.push(`-hls_time 4 -hls_list_size 0`);
+  } else if (o.proto === "RTSP") {
+    parts.push(`-rtsp_transport tcp`);
+  }
+  // 输出地址加引号：RTSP/HLS 地址可能带查询参数，HLS 也常见写到含空格的本地路径
+  parts.push(`-f ${pushFormat(o.proto)} ${q(o.url)}`);
+  return ffmpegCmd(parts.join(" "));
+}
+
+/** 拉流录制：从 RTMP/HLS/RTSP/HTTP-FLV 拉流保存为本地文件 */
+function buildPull(o: StreamOpts): string {
+  const parts: string[] = [];
+  // RTSP 默认走 UDP，过 NAT/防火墙常连不上；强制 TCP 更稳
+  if (o.proto === "RTSP") parts.push(`-rtsp_transport tcp`);
+  parts.push(`-i ${q(o.url)}`);
+  if (o.transcode) {
+    parts.push(
+      `-c:v libx264 -preset ${o.preset} -b:v ${o.vbr} -pix_fmt yuv420p -c:a aac -b:a ${o.abr}`
     );
-  const ext = o.proto === "HLS" ? "m3u8" : "mp4";
-  return ffmpegCmd(`-i "${o.url}" -c copy record.${ext}`);
+  } else {
+    // 直接拷贝：最省资源，输出容器需兼容源编码（RTMP/RTSP/HLS 多为 H.264/AAC）
+    parts.push(`-c copy`);
+  }
+  // 输出名由调用方给出（含扩展名，容器随扩展名走），默认带时间戳。
+  //
+  // 默认容器是 TS：拉流是无限长的直播流，通常只能靠用户「取消」结束，而队列的取消是
+  // 硬杀进程（cancel_ffmpeg → child.kill()）。实测被强杀后：
+  //   mp4 → 48 字节 + moov atom not found，完全不可播放；
+  //   mkv → 0 字节 + EBML header parsing failed，不可播放；
+  //   ts  → 保留已录片段（262144 字节 ≈ 4.79 秒）且可正常播放（188 字节独立包，抗截断）。
+  // 用户若改选 mp4/mkv，界面会明确标注"取消后文件会损坏"。
+  parts.push(outArg(o.outName || "record.ts"));
+  return ffmpegCmd(parts.join(" "));
 }
 
 export interface BatchItem {
