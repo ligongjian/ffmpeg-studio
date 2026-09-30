@@ -1,27 +1,10 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { store, toggleTheme, setTab } from "../store";
+// 标题表由 nav.ts 的单一数据源生成：新增模块不会再出现「侧栏有、顶栏 fallback」的不同步
+import { TITLES } from "../nav";
 
 const emit = defineEmits<{ (e: "toggle-sidebar"): void }>();
-
-const TITLES: Record<string, [string, string]> = {
-  dashboard: ["工作台", "总览与快速开始"],
-  convert: ["格式转换", "容器互转与编解码"],
-  compress: ["压缩优化", "CRF / 预设 / 码率控制"],
-  cut: ["剪辑分割", "时间轴精确截取"],
-  merge: ["拼接合并", "多文件顺序合并"],
-  extract: ["提取分离", "音视频 / 帧 / 缩略图"],
-  watermark: ["水印字幕", "图片 / 文字 / 硬字幕"],
-  filters: ["滤镜调色", "叠加式滤镜链"],
-  audio: ["音频处理", "转码 / 调音 / 拼接"],
-  gif: ["动图 GIF", "调色板两步法"],
-  info: ["媒体信息", "探针与元数据"],
-  record: ["录制采集", "屏幕 / 摄像头 / 画中画"],
-  stream: ["流媒体", "RTMP / HLS 推拉流"],
-  batch: ["批量处理", "目录级批处理"],
-  settings: ["设置", "引擎与默认项"],
-  tasks: ["任务队列", "运行中的任务与历史"],
-};
 
 const title = computed(() => TITLES[store.tab]?.[0] ?? "FFmpeg Studio");
 const sub = computed(() => TITLES[store.tab]?.[1] ?? "");

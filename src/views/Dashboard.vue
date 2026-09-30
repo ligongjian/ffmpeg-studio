@@ -2,12 +2,8 @@
 import { computed, ref, onMounted, onUnmounted } from "vue";
 import { store, setTab, pickInput, setInputFile } from "../store";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-
-const QUICK: [string, string][] = [
-  ["格式转换", "convert"], ["压缩优化", "compress"], ["剪辑分割", "cut"], ["拼接合并", "merge"],
-  ["提取分离", "extract"], ["水印字幕", "watermark"], ["滤镜调色", "filters"], ["录制采集", "record"],
-  ["流媒体", "stream"], ["批量处理", "batch"],
-];
+// 快速开始入口由 nav.ts 派生，新增模块自动出现（此前手工维护，漏了 audio/gif/info）
+import { QUICK } from "../nav";
 
 // 真实统计：全部基于 store.tasks 实时聚合（原先的「24 任务 / 3.2h / 8.4GB」是写死的假数字）
 function isSameDay(ts: number, ref: Date): boolean {
@@ -109,11 +105,11 @@ onUnmounted(() => {
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
           <button
             v-for="q in QUICK"
-            :key="q[1]"
+            :key="q.tab"
             class="rounded-xl border border-panel2 bg-ink/40 py-3 text-sm font-medium hover:border-brand hover:text-brand transition-colors cursor-pointer"
-            @click="setTab(q[1])"
+            @click="setTab(q.tab)"
           >
-            {{ q[0] }}
+            {{ q.label }}
           </button>
         </div>
       </div>

@@ -1,26 +1,9 @@
 <script setup lang="ts">
 import { store, setTab } from "../store";
+import { NAV } from "../nav";
 
 defineProps<{ open: boolean }>();
 const emit = defineEmits<{ (e: "close"): void }>();
-
-const NAV: { tab: string; label: string; icon: string }[] = [
-  { tab: "dashboard", label: "工作台", icon: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>' },
-  { tab: "convert", label: "格式转换", icon: '<path d="M4 7h11l-3-3M20 17H9l3 3" stroke-linecap="round" stroke-linejoin="round"/>' },
-  { tab: "compress", label: "压缩优化", icon: '<path d="M3 8h6l-2-2M21 16h-6l2 2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 8v8M15 8v8"/>' },
-  { tab: "cut", label: "剪辑分割", icon: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.5 15.5M14.5 14.5L20 20M8.5 8.5L12 12" stroke-linecap="round"/>' },
-  { tab: "merge", label: "拼接合并", icon: '<path d="M8 4v16M16 4v16M8 12h8" stroke-linecap="round"/>' },
-  { tab: "extract", label: "提取分离", icon: '<path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" stroke-linecap="round" stroke-linejoin="round"/>' },
-  { tab: "watermark", label: "水印字幕", icon: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 15l5-5 4 4 3-3 6 6" stroke-linecap="round" stroke-linejoin="round"/>' },
-  { tab: "filters", label: "滤镜调色", icon: '<path d="M3 4h18l-7 8v6l-4 2v-8L3 4z" stroke-linecap="round" stroke-linejoin="round"/>' },
-  { tab: "audio", label: "音频处理", icon: '<path d="M9 18V6l10-2v12M9 13l10-2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/>' },
-  { tab: "gif", label: "动图 GIF", icon: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 9h2a2 2 0 110 4H9V9zm5 0v6m3-6v6" stroke-linecap="round" stroke-linejoin="round"/>' },
-  { tab: "info", label: "媒体信息", icon: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01" stroke-linecap="round"/>' },
-  { tab: "record", label: "录制采集", icon: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3" fill="currentColor"/>' },
-  { tab: "stream", label: "流媒体", icon: '<path d="M3 7l4 4-4 4M11 16h7M11 12h7M11 8h7" stroke-linecap="round" stroke-linejoin="round"/>' },
-  { tab: "batch", label: "批量处理", icon: '<rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="16" width="18" height="4" rx="1"/>' },
-  { tab: "tasks", label: "任务队列", icon: '<path d="M4 6h16M4 12h16M4 18h10" stroke-linecap="round"/>' },
-];
 </script>
 
 <template>
