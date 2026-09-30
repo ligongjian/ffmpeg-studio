@@ -2,27 +2,7 @@
 import { reactive, ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { store, pickInput, setInputFile } from "../store";
-
-interface StreamInfo {
-  index: number;
-  codecType: string;
-  codecName: string;
-  width?: number | null;
-  height?: number | null;
-  sampleRate?: number | null;
-  channels?: number | null;
-  bitRate?: number | null;
-}
-interface MediaInfo {
-  size: number;
-  duration: number;
-  formatName?: string | null;
-  videoBitrate?: number | null;
-  videoWidth?: number | null;
-  videoHeight?: number | null;
-  streams: StreamInfo[];
-}
+import { store, pickInput, setInputFile, type MediaInfo, type StreamInfo } from "../store";
 
 type Slot = { file: string; info: MediaInfo | null; err: string; probing: boolean };
 const a = reactive<Slot>({ file: "", info: null, err: "", probing: false });
@@ -149,6 +129,32 @@ const TYPE_LABEL: Record<string, string> = {
   attachment: "附件",
 };
 
+/** 常见 ISO 639-2 语言码；未收录的码原样显示 */
+const LANG_LABEL: Record<string, string> = {
+  und: "未指定",
+  eng: "英语",
+  chi: "中文",
+  zho: "中文",
+  jpn: "日语",
+  kor: "韩语",
+  fre: "法语",
+  fra: "法语",
+  ger: "德语",
+  deu: "德语",
+  spa: "西班牙语",
+  rus: "俄语",
+};
+
+/** 容器标签的中文名；未收录的键原样显示 */
+const TAG_LABEL: Record<string, string> = {
+  title: "标题",
+  artist: "艺术家",
+  album: "专辑",
+  encoder: "编码器",
+  creation_time: "创建时间",
+  comment: "注释",
+};
+
 function fmtBytes(b: number): string {
   if (b >= 1024 ** 3) return `${(b / 1024 ** 3).toFixed(2)} GB`;
   if (b >= 1024 ** 2) return `${(b / 1024 ** 2).toFixed(1)} MB`;
@@ -164,14 +170,58 @@ function fmtDuration(s: number): string {
   if (h) return `${h}:${String(m).padStart(2, "0")}:${String(x).padStart(2, "0")}`;
   return `${m}:${String(x).padStart(2, "0")}.${String(ms).padStart(3, "0")}`;
 }
+function fmtKbps(b?: number | null): string {
+  if (!b) return "";
+  const k = b / 1000;
+  return k >= 1000 ? `${(k / 1000).toFixed(2)} Mbps` : `${Math.round(k)} kbps`;
+}
+function fmtFps(f?: number | null): string {
+  if (!f) return "—";
+  // 保留两位再去掉多余的 0：30 → "30"，29.970… → "29.97"
+  return `${Number(f.toFixed(2))} fps`;
+}
+function langLabel(code?: string | null): string {
+  if (!code) return "";
+  return LANG_LABEL[code] || code;
+}
+
+/** 「3 条 · 视频 1 · 音频 1 · 字幕 1」式的流构成概览 */
+function streamSummary(list: StreamInfo[]): string {
+  if (!list.length) return "0 条";
+  const count: Record<string, number> = {};
+  for (const s of list) count[s.codecType] = (count[s.codecType] || 0) + 1;
+  const parts = Object.entries(count).map(([k, v]) => `${TYPE_LABEL[k] || k} ${v}`);
+  return `${list.length} 条 · ${parts.join(" · ")}`;
+}
+
 function streamDetail(st: StreamInfo): string {
   const parts: string[] = [];
-  if (st.codecType === "video" && st.width && st.height) parts.push(`${st.width}×${st.height}`);
-  if (st.codecType === "audio") {
-    if (st.sampleRate) parts.push(`${Math.round(st.sampleRate / 1000)} kHz`);
-    if (st.channels) parts.push(`${st.channels} 声道`);
+  if (st.codecType === "video") {
+    if (st.width && st.height) parts.push(`${st.width}×${st.height}`);
+    if (st.displayAspectRatio) parts.push(`DAR ${st.displayAspectRatio}`);
+    if (
+      st.codedWidth &&
+      st.codedHeight &&
+      (st.codedWidth !== st.width || st.codedHeight !== st.height)
+    ) {
+      parts.push(`编码 ${st.codedWidth}×${st.codedHeight}`);
+    }
+    if (st.pixFmt) parts.push(st.pixFmt);
+    if (st.colorSpace) parts.push(st.colorSpace);
+    const fps = fmtFps(st.fps);
+    if (fps !== "—") parts.push(fps);
+    if (st.profile) parts.push(st.level ? `${st.profile} L${st.level}` : st.profile);
+    if (st.nbFrames) parts.push(`${st.nbFrames} 帧`);
+  } else if (st.codecType === "audio") {
+    if (st.sampleRate) parts.push(`${(st.sampleRate / 1000).toFixed(1)} kHz`);
+    if (st.channelLayout) parts.push(st.channelLayout);
+    else if (st.channels) parts.push(`${st.channels} 声道`);
+    if (st.sampleFmt) parts.push(st.sampleFmt);
+  } else if (st.language) {
+    parts.push(langLabel(st.language));
   }
-  if (st.bitRate) parts.push(`${Math.round(st.bitRate / 1000)} kbps`);
+  const br = fmtKbps(st.bitRate);
+  if (br) parts.push(br);
   return parts.join(" · ");
 }
 </script>

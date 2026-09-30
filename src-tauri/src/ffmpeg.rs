@@ -434,31 +434,61 @@ pub fn probe_media_duration(state: State<FfmpegState>, path: String) -> Result<f
     probe_media_info_full(&path, &state.ffmpeg_path()).map(|i| i.duration)
 }
 
-/// 单个流的元信息（用于前端探针展示逐流详情）。
+/// 容器/文件的元数据标签（title / encoder / creation_time …）。
 #[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaTag {
+    pub key: String,
+    pub value: String,
+}
+
+/// 单个流的元信息（用于前端探针展示逐流详情）。
+#[derive(Clone, serde::Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct StreamInfo {
     pub index: u32,
     pub codec_type: String,
     pub codec_name: String,
+    pub codec_long_name: Option<String>,
+    pub profile: Option<String>,
+    pub level: Option<String>,
+    pub codec_tag_string: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
+    pub coded_width: Option<u32>,
+    pub coded_height: Option<u32>,
+    pub pix_fmt: Option<String>,
+    pub color_space: Option<String>,
+    pub display_aspect_ratio: Option<String>,
+    /// 由 avg_frame_rate（num/den）换算出的帧率；音频等无帧率流为 None
+    pub fps: Option<f64>,
+    pub nb_frames: Option<u64>,
     pub sample_rate: Option<u32>,
     pub channels: Option<u32>,
+    pub channel_layout: Option<String>,
+    pub sample_fmt: Option<String>,
     pub bit_rate: Option<u64>,
+    pub language: Option<String>,
+    pub title: Option<String>,
 }
 
-/// 媒体文件信息：文件大小、时长、封装格式，以及全部流的逐流详情。
+/// 媒体文件信息：文件大小、时长、封装格式、总码率，以及全部流的逐流详情。
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MediaInfo {
     pub size: u64,
     pub duration: f64,
     pub format_name: Option<String>,
+    pub format_long_name: Option<String>,
+    /// 容器总码率（含所有流与封装开销）
+    pub bit_rate: Option<u64>,
+    pub start_time: Option<f64>,
     pub video_bitrate: Option<u64>,
     pub video_width: Option<u32>,
     pub video_height: Option<u32>,
+    pub video_fps: Option<f64>,
     pub streams: Vec<StreamInfo>,
+    pub tags: Vec<MediaTag>,
 }
 
 /// 把 ffmpeg 可执行文件路径里的"ffmpeg"改成"ffprobe"。
@@ -554,6 +584,18 @@ fn run_with_timeout(cmd: &mut Command, timeout: std::time::Duration) -> Result<s
     })
 }
 
+/// 把 ffprobe 的 `num/den` 帧率（如 "30/1"、"30000/1001"）换算成 f64；
+/// 音频流等无帧率的 "0/0" 返回 None。
+fn parse_frame_rate(v: &str) -> Option<f64> {
+    let (n, d) = v.trim().split_once('/')?;
+    let n: f64 = n.trim().parse().ok()?;
+    let d: f64 = d.trim().parse().ok()?;
+    if d <= 0.0 {
+        return None;
+    }
+    Some(n / d)
+}
+
 fn probe_media_info_full(path: &str, ffmpeg_bin: &str) -> Result<MediaInfo, String> {
     if path.trim().is_empty() {
         return Err("未指定文件".into());
@@ -562,14 +604,17 @@ fn probe_media_info_full(path: &str, ffmpeg_bin: &str) -> Result<MediaInfo, Stri
     let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
 
     let ffprobe = derive_ffprobe_path(ffmpeg_bin);
-    // 单次探测：format + stream 一次拿全，再不必跑两三次。
+    // 单次探测：format + stream + tags 一次拿全，再不必跑两三次。
+    // 用 -of default（带 [STREAM] / [FORMAT] 分段，逐行 key=value）：比逐行扫 JSON 稳，
+    // 且 tags 以 TAG:key=value 出现，不会与同名的 stream 字段混淆（JSON 里会嵌套）。
     let mut cmd = Command::new(&ffprobe);
     cmd.args([
         "-v", "error",
-        "-show_entries", "format=duration,format_name",
-        "-show_entries",
-        "stream=index,codec_type,codec_name,bit_rate,width,height,sample_rate,channels",
-        "-of", "json",
+        "-show_entries", "format=duration,format_name,format_long_name,bit_rate,size,nb_streams,start_time",
+        "-show_entries", "stream=index,codec_name,codec_long_name,profile,level,codec_type,codec_tag_string,width,height,coded_width,coded_height,pix_fmt,color_space,display_aspect_ratio,avg_frame_rate,nb_frames,bit_rate,sample_rate,channels,channel_layout,sample_fmt",
+        "-show_entries", "stream_tags=language,title",
+        "-show_entries", "format_tags=title,artist,album,encoder,creation_time,comment",
+        "-of", "default",
         path,
     ]);
     let out = run_with_timeout(&mut cmd, std::time::Duration::from_secs(15))
@@ -582,92 +627,146 @@ fn probe_media_info_full(path: &str, ffmpeg_bin: &str) -> Result<MediaInfo, Stri
         ));
     }
 
-    // 不引入 serde_json 解析，逐行扫 JSON——简单且足够稳定。
-    // ffprobe -of json 把每个 stream 输出为独立的 `{ ... }` 块，顶层 format 段在其后。
     let text = String::from_utf8_lossy(&out.stdout);
     let mut duration = 0.0_f64;
     let mut format_name: Option<String> = None;
+    let mut format_long_name: Option<String> = None;
+    let mut bit_rate: Option<u64> = None;
+    let mut start_time: Option<f64> = None;
+    let mut tags: Vec<MediaTag> = Vec::new();
     let mut video_bitrate: Option<u64> = None;
     let mut width: Option<u32> = None;
     let mut height: Option<u32> = None;
+    let mut video_fps: Option<f64> = None;
     let mut streams: Vec<StreamInfo> = Vec::new();
-    let mut cur: Option<StreamInfo> = None;
 
-    fn parse_opt_u32(v: &str) -> Option<u32> {
-        let s = v.trim().trim_end_matches(',').trim();
-        if s.starts_with('"') {
-            return None; // "N/A" 等字符串，无数值
+    // default 格式取值：空 / "N/A" / "unknown" 一律当作没有
+    fn val(v: &str) -> Option<String> {
+        let s = v.trim();
+        if s.is_empty() || s == "N/A" || s == "unknown" {
+            None
+        } else {
+            Some(s.to_string())
         }
-        s.parse::<u32>().ok()
+    }
+    fn parse_opt_u32(v: &str) -> Option<u32> {
+        v.trim().parse::<u32>().ok()
     }
     fn parse_opt_u64(v: &str) -> Option<u64> {
-        let s = v.trim().trim_end_matches(',').trim();
-        if s.starts_with('"') {
-            return None;
-        }
-        s.parse::<u64>().ok()
+        v.trim().parse::<u64>().ok()
     }
+
+    #[derive(PartialEq)]
+    enum Sec {
+        None,
+        Format,
+        Stream,
+    }
+    let mut section = Sec::None;
+    let mut cur: Option<StreamInfo> = None;
 
     for line in text.lines() {
         let line = line.trim();
-        if let Some(v) = line.strip_prefix("\"duration\":") {
-            let num = v.trim().trim_end_matches(',').trim().trim_matches('"');
-            duration = num.parse::<f64>().unwrap_or(duration);
-            continue;
-        }
-        if let Some(v) = line.strip_prefix("\"format_name\":") {
-            let s = v.trim().trim_end_matches(',').trim().trim_matches('"');
-            format_name = Some(s.to_string());
-            continue;
-        }
-        // 新的 stream 对象开始：顶层 `streams` 数组里每个 `{` 独占一行
-        if line == "{" && cur.is_none() {
-            cur = Some(StreamInfo {
-                index: 0,
-                codec_type: String::new(),
-                codec_name: String::new(),
-                width: None,
-                height: None,
-                sample_rate: None,
-                channels: None,
-                bit_rate: None,
-            });
-            continue;
-        }
-        if let Some(c) = &mut cur {
-            if let Some(v) = line.strip_prefix("\"index\":") {
-                c.index = v.trim().trim_end_matches(',').trim().parse().unwrap_or(0);
-            } else if let Some(v) = line.strip_prefix("\"codec_type\":") {
-                c.codec_type = v.trim().trim_end_matches(',').trim().trim_matches('"').to_string();
-            } else if let Some(v) = line.strip_prefix("\"codec_name\":") {
-                c.codec_name = v.trim().trim_end_matches(',').trim().trim_matches('"').to_string();
-            } else if let Some(v) = line.strip_prefix("\"width\":") {
-                c.width = parse_opt_u32(v);
-            } else if let Some(v) = line.strip_prefix("\"height\":") {
-                c.height = parse_opt_u32(v);
-            } else if let Some(v) = line.strip_prefix("\"sample_rate\":") {
-                c.sample_rate = parse_opt_u32(v);
-            } else if let Some(v) = line.strip_prefix("\"channels\":") {
-                c.channels = parse_opt_u32(v);
-            } else if let Some(v) = line.strip_prefix("\"bit_rate\":") {
-                c.bit_rate = parse_opt_u64(v);
+        match line {
+            "[FORMAT]" => {
+                section = Sec::Format;
+                continue;
             }
-            // 流对象结束（顶层每个 `}` 独占一行，可能带尾逗号）
-            if line.ends_with('}') {
-                if c.codec_type == "video" {
-                    if width.is_none() {
-                        width = c.width;
+            "[/FORMAT]" => {
+                section = Sec::None;
+                continue;
+            }
+            "[STREAM]" => {
+                section = Sec::Stream;
+                cur = Some(StreamInfo::default());
+                continue;
+            }
+            "[/STREAM]" => {
+                section = Sec::None;
+                if let Some(c) = cur.take() {
+                    if c.codec_type == "video" {
+                        if width.is_none() {
+                            width = c.width;
+                        }
+                        if height.is_none() {
+                            height = c.height;
+                        }
+                        if video_bitrate.is_none() {
+                            video_bitrate = c.bit_rate;
+                        }
+                        if video_fps.is_none() {
+                            video_fps = c.fps;
+                        }
                     }
-                    if height.is_none() {
-                        height = c.height;
+                    streams.push(c);
+                }
+                continue;
+            }
+            _ => {}
+        }
+
+        let (k, v) = match line.split_once('=') {
+            Some(kv) => kv,
+            None => continue,
+        };
+
+        match section {
+            Sec::Format => {
+                if let Some(t) = k.strip_prefix("TAG:") {
+                    if let Some(value) = val(v) {
+                        tags.push(MediaTag {
+                            key: t.to_string(),
+                            value,
+                        });
                     }
-                    if video_bitrate.is_none() {
-                        video_bitrate = c.bit_rate;
+                } else {
+                    match k {
+                        "duration" => duration = v.trim().parse::<f64>().unwrap_or(duration),
+                        "format_name" => format_name = val(v),
+                        "format_long_name" => format_long_name = val(v),
+                        "bit_rate" => bit_rate = parse_opt_u64(v),
+                        "start_time" => start_time = v.trim().parse::<f64>().ok(),
+                        _ => {}
                     }
                 }
-                streams.push(c.clone());
-                cur = None;
             }
+            Sec::Stream => {
+                if let Some(c) = cur.as_mut() {
+                    if let Some(t) = k.strip_prefix("TAG:") {
+                        match t {
+                            "language" => c.language = val(v),
+                            "title" => c.title = val(v),
+                            _ => {}
+                        }
+                    } else {
+                        match k {
+                            "index" => c.index = v.trim().parse().unwrap_or(0),
+                            "codec_type" => c.codec_type = v.trim().to_string(),
+                            "codec_name" => c.codec_name = v.trim().to_string(),
+                            "codec_long_name" => c.codec_long_name = val(v),
+                            "profile" => c.profile = val(v),
+                            "level" => c.level = val(v),
+                            "codec_tag_string" => c.codec_tag_string = val(v),
+                            "width" => c.width = parse_opt_u32(v),
+                            "height" => c.height = parse_opt_u32(v),
+                            "coded_width" => c.coded_width = parse_opt_u32(v),
+                            "coded_height" => c.coded_height = parse_opt_u32(v),
+                            "pix_fmt" => c.pix_fmt = val(v),
+                            "color_space" => c.color_space = val(v),
+                            "display_aspect_ratio" => c.display_aspect_ratio = val(v),
+                            "avg_frame_rate" => c.fps = parse_frame_rate(v),
+                            "nb_frames" => c.nb_frames = parse_opt_u64(v),
+                            "bit_rate" => c.bit_rate = parse_opt_u64(v),
+                            "sample_rate" => c.sample_rate = parse_opt_u32(v),
+                            "channels" => c.channels = parse_opt_u32(v),
+                            "channel_layout" => c.channel_layout = val(v),
+                            "sample_fmt" => c.sample_fmt = val(v),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            Sec::None => {}
         }
     }
 
@@ -675,10 +774,15 @@ fn probe_media_info_full(path: &str, ffmpeg_bin: &str) -> Result<MediaInfo, Stri
         size,
         duration,
         format_name,
+        format_long_name,
+        bit_rate,
+        start_time,
         video_bitrate,
         video_width: width,
         video_height: height,
+        video_fps,
         streams,
+        tags,
     })
 }
 

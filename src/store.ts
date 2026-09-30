@@ -28,13 +28,55 @@ export interface Recent {
   size: string;
 }
 
-/** 源文件元信息（由后端 probe_media_info 提供，用于压缩页预估输出） */
+/** 容器/文件元数据标签（title / encoder / creation_time …） */
+export interface MediaTag {
+  key: string;
+  value: string;
+}
+
+/** 单条流的元信息（对应后端 StreamInfo，camelCase 序列化） */
+export interface StreamInfo {
+  index: number;
+  codecType: string;
+  codecName: string;
+  codecLongName?: string | null;
+  profile?: string | null;
+  level?: string | null;
+  codecTagString?: string | null;
+  width?: number | null;
+  height?: number | null;
+  codedWidth?: number | null;
+  codedHeight?: number | null;
+  pixFmt?: string | null;
+  colorSpace?: string | null;
+  displayAspectRatio?: string | null;
+  /** 由 avg_frame_rate 换算出的帧率；音频等无帧率流为 null */
+  fps?: number | null;
+  nbFrames?: number | null;
+  sampleRate?: number | null;
+  channels?: number | null;
+  channelLayout?: string | null;
+  sampleFmt?: string | null;
+  bitRate?: number | null;
+  language?: string | null;
+  title?: string | null;
+}
+
+/** 源文件元信息（由后端 probe_media_info 提供；压缩页预估与媒体信息页共用） */
 export interface MediaInfo {
   size: number;
   duration: number;
+  formatName?: string | null;
+  formatLongName?: string | null;
+  /** 容器总码率（含所有流与封装开销） */
+  bitRate?: number | null;
+  startTime?: number | null;
   videoBitrate: number | null;
   videoWidth: number | null;
   videoHeight: number | null;
+  videoFps?: number | null;
+  streams: StreamInfo[];
+  tags?: MediaTag[];
 }
 
 export const store = reactive({
