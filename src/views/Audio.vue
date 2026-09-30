@@ -245,25 +245,7 @@ const cmd = computed(() =>
         />
       </div>
 
-      <div class="grid md:grid-cols-2 gap-4">
-        <div>
-          <label class="text-xs text-muted">输出格式</label>
-          <select v-model="s.outFmt" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none">
-            <option v-for="f in AUDIO_FMT" :key="f.value" :value="f.value">{{ f.label }}</option>
-          </select>
-          <p class="mt-1 text-[11px] text-muted">编码器：{{ AUDIO_ONLY_FMT[s.outFmt] || "aac" }}</p>
-        </div>
-        <div>
-          <label class="text-xs text-muted">采样率</label>
-          <select v-model.number="s.sampleRate" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none">
-            <option v-for="r in SAMPLE_RATES" :key="r.value" :value="r.value">{{ r.label }}</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="text-xs text-muted">输出文件：<span class="text-brand font-mono">{{ outputName }}</span></div>
-
-      <!-- 处理模式 -->
+      <!-- 输入选择：处理模式（单文件） -->
       <template v-if="s.mode === 'process'">
         <div>
           <label class="text-sm font-semibold mb-2 block">输入选择（源文件）</label>
@@ -286,7 +268,55 @@ const cmd = computed(() =>
             </template>
           </div>
         </div>
+      </template>
 
+      <!-- 输入选择：拼接模式（多文件，按顺序） -->
+      <template v-else>
+        <div>
+          <label class="text-sm font-semibold mb-2 block">输入选择（按顺序拼接）</label>
+          <div
+            ref="zoneConcat"
+            class="rounded-xl border-2 border-dashed px-4 py-6 text-center cursor-pointer transition-all"
+            :class="dragOverConcat ? 'border-brand bg-brand/10 shadow-glow' : 'border-panel2 bg-ink/40 hover:border-brand hover:bg-brand/5 hover:shadow-glow'"
+            @click="addFiles"
+          >
+            <div class="font-semibold text-sm">+ 添加音频文件</div>
+            <div class="text-xs text-muted mt-1">已选择 {{ s.files.length }} 个文件（按顺序排列）</div>
+            <div class="text-[11px] text-muted mt-1">也可直接把文件拖拽到此处</div>
+          </div>
+        </div>
+        <div v-if="s.files.length" class="space-y-2 max-h-48 overflow-y-auto pr-1">
+          <div v-for="(f, i) in s.files" :key="f" class="flex items-center gap-3 bg-ink/50 rounded-lg px-3 py-2 text-sm">
+            <span class="text-muted w-6 text-right shrink-0">{{ i + 1 }}</span>
+            <div class="min-w-0 flex-1 truncate">{{ f.split(/[\\/]/).pop() }}</div>
+            <button class="shrink-0 w-7 h-7 rounded-lg bg-panel2 hover:bg-red-500/30 text-muted hover:text-red-300 transition-colors cursor-pointer" @click="removeAt(i)">×</button>
+          </div>
+        </div>
+        <p v-if="s.files.length && totalDurationText" class="text-[11px] text-muted">
+          拼接总时长 ≈ <span class="text-brand font-mono">{{ totalDurationText }}</span>（用于淡出起点计算）
+        </p>
+      </template>
+
+      <div class="grid md:grid-cols-2 gap-4">
+        <div>
+          <label class="text-xs text-muted">输出格式</label>
+          <select v-model="s.outFmt" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none">
+            <option v-for="f in AUDIO_FMT" :key="f.value" :value="f.value">{{ f.label }}</option>
+          </select>
+          <p class="mt-1 text-[11px] text-muted">编码器：{{ AUDIO_ONLY_FMT[s.outFmt] || "aac" }}</p>
+        </div>
+        <div>
+          <label class="text-xs text-muted">采样率</label>
+          <select v-model.number="s.sampleRate" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none">
+            <option v-for="r in SAMPLE_RATES" :key="r.value" :value="r.value">{{ r.label }}</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="text-xs text-muted">输出文件：<span class="text-brand font-mono">{{ outputName }}</span></div>
+
+      <!-- 处理模式 -->
+      <template v-if="s.mode === 'process'">
         <div>
           <div class="flex items-center gap-2">
             <span class="text-xs text-muted">音质档位</span>
@@ -347,29 +377,9 @@ const cmd = computed(() =>
 
       <!-- 拼接模式 -->
       <template v-else>
-        <div
-          ref="zoneConcat"
-          class="rounded-xl border-2 border-dashed px-4 py-6 text-center cursor-pointer transition-all"
-          :class="dragOverConcat ? 'border-brand bg-brand/10 shadow-glow' : 'border-panel2 bg-ink/40 hover:border-brand hover:bg-brand/5 hover:shadow-glow'"
-          @click="addFiles"
-        >
-          <div class="font-semibold text-sm">+ 添加音频文件</div>
-          <div class="text-xs text-muted mt-1">已选择 {{ s.files.length }} 个文件（按顺序排列）</div>
-          <div class="text-[11px] text-muted mt-1">也可直接把文件拖拽到此处</div>
-        </div>
-        <div v-if="s.files.length" class="space-y-2 max-h-48 overflow-y-auto pr-1">
-          <div v-for="(f, i) in s.files" :key="f" class="flex items-center gap-3 bg-ink/50 rounded-lg px-3 py-2 text-sm">
-            <span class="text-muted w-6 text-right shrink-0">{{ i + 1 }}</span>
-            <div class="min-w-0 flex-1 truncate">{{ f.split(/[\\/]/).pop() }}</div>
-            <button class="shrink-0 w-7 h-7 rounded-lg bg-panel2 hover:bg-red-500/30 text-muted hover:text-red-300 transition-colors cursor-pointer" @click="removeAt(i)">×</button>
-          </div>
-        </div>
-        <p v-if="s.files.length && totalDurationText" class="text-[11px] text-muted">
-          拼接总时长 ≈ <span class="text-brand font-mono">{{ totalDurationText }}</span>（用于淡出起点计算）
-        </p>
         <p class="text-[11px] text-muted">
           拼接采用 filter_complex 串联，各文件需同为音频；输出统一重编码为所选格式。
-          上方勾选的音量增益、淡入淡出、响度归一化、去静音会整体作用于拼接结果。
+          若需在拼接后整体调音（音量 / 淡入淡出 / 响度归一化 / 去静音），先切换到「音频处理」模式处理拼接产物。
         </p>
       </template>
     </div>
