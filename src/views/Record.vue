@@ -183,10 +183,15 @@ onUnmounted(() => {
 });
 
 const cmd = computed(() => {
+  // 预览用稳定占位时间戳：真实录制时由 doStart 用当前时刻生成，
+  // 这里避免文件名每秒跳动、也避免用户复制下来的命令带着过期时间戳。
+  const sel = displays[s.displayIdx];
   const opts: RecordOpts = {
     mode: s.mode,
-    displayX: displays[s.displayIdx]?.x ?? 0,
-    displayY: displays[s.displayIdx]?.y ?? 0,
+    displayX: sel?.x ?? 0,
+    displayY: sel?.y ?? 0,
+    captureW: sel?.width ?? 0,
+    captureH: sel?.height ?? 0,
     cameraDevice: s.cameraDevice,
     audioSource: s.audioSource,
     audioDevice: s.audioDevice,
@@ -196,7 +201,7 @@ const cmd = computed(() => {
     vBitrateMbps: s.vBitrateMbps,
     fmt: s.fmt,
     camScalePct: s.camScalePct,
-    outName: `record_${previewTs.value}.${s.fmt}`,
+    outName: `record_YYYYMMDD_HHMMSS.${s.fmt}`,
   };
   return buildRecordCommand(opts);
 });
@@ -205,11 +210,15 @@ const outputName = computed(() => `record_${previewTs.value}.${s.fmt}`);
 
 // ===== 倒计时 =====
 let countdownTimer: number | undefined;
-const countingDown = computed(() => store.recording === false && s.countdown > 0);
+// 独立的「正在倒计时」状态：只有用户点了「开始录制」、进入倒计时阶段才为 true。
+// 不能复用 `s.countdown > 0` 当遮罩条件——因为初始默认值就是 3，会让一进页面
+// 就错误显示「准备开始 倒计时 3 秒后开始录制」的遮罩，把配置卡挤下去。
+const isCounting = ref(false);
 
 function clearCountdown() {
   if (countdownTimer) window.clearTimeout(countdownTimer);
   countdownTimer = undefined;
+  isCounting.value = false;
 }
 
 // ===== 启动录制 =====
@@ -241,8 +250,9 @@ function start() {
     );
     return;
   }
-  // 倒计时开始
-  s.countdown = s.countdown > 0 ? Math.min(s.countdown, 3) : 0;
+  // 进入倒计时阶段（countdown=0 时 runCountdown 内部会立即开始录制，
+  // 不做任何截断——尊重用户在 UI 上设的 0/3/6/9/10 秒）。
+  isCounting.value = true;
   runCountdown();
 }
 
@@ -263,12 +273,17 @@ function runCountdown() {
 }
 
 async function doStart() {
+  // 倒计时结束，退出「正在倒计时」阶段（即使出现异常也确保遮罩收起）
+  isCounting.value = false;
   // 倒计时结束后立即开录——此时生成的时间戳才是真实的开始时刻
   const realTs = makeTs();
+  const sel = displays[s.displayIdx];
   const opts: RecordOpts = {
     mode: s.mode,
-    displayX: displays[s.displayIdx]?.x ?? 0,
-    displayY: displays[s.displayIdx]?.y ?? 0,
+    displayX: sel?.x ?? 0,
+    displayY: sel?.y ?? 0,
+    captureW: sel?.width ?? 0,
+    captureH: sel?.height ?? 0,
     cameraDevice: s.cameraDevice,
     audioSource: s.audioSource,
     audioDevice: s.audioDevice,
@@ -380,7 +395,7 @@ const canStart = computed(
 
     <!-- 倒计时遮罩 -->
     <div
-      v-else-if="countingDown"
+      v-else-if="isCounting"
       class="card rounded-2xl p-5 border-brand/40 bg-brand/5 flex items-center gap-4"
     >
       <div class="flex-1">

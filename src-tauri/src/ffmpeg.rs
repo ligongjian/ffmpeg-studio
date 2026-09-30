@@ -66,7 +66,8 @@ pub struct FfmpegState {
     /// 每个任务收集到的 ffmpeg 输出（stderr）。进程结束后仍保留，供「详情」查看。
     logs: Arc<Mutex<HashMap<String, Vec<String>>>>,
     /// 录制会话：同时只能有一段录制，与任务队列的 running 完全隔离。
-    record: Mutex<Option<Recording>>,
+    /// 用 Arc 包裹，便于把引用分发给后台监视线程（stop_record 仍需在此查询 child 的 stdin）。
+    record: Arc<Mutex<Option<Recording>>>,
 }
 
 impl FfmpegState {
@@ -75,7 +76,7 @@ impl FfmpegState {
             settings: Mutex::new(Settings::default()),
             running: Arc::new(Mutex::new(HashMap::new())),
             logs: Arc::new(Mutex::new(HashMap::new())),
-            record: Mutex::new(None),
+            record: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -133,6 +134,42 @@ fn tail_log_line(logs: &Arc<Mutex<HashMap<String, Vec<String>>>>, id: &str) -> O
         })
 }
 
+/// 致命错误关键词：命中任一个都说明 ffmpeg 没能正常完成录制（与「用户按 q 主动停止」区分开）。
+const FATAL_KEYWORDS: &[&str] = &[
+    "Error opening",
+    "Invalid argument",
+    "Permission denied",
+    "No such file",
+    "Unable to find a suitable output format",
+    "Device or resource busy",
+    "Cannot open audio device",
+    "Unknown encoder",
+    "Unrecognized option",
+    "avformat_open_input",
+];
+
+/// 日志里是否出现致命错误标记。
+fn log_has_fatal(log: &str) -> bool {
+    FATAL_KEYWORDS.iter().any(|kw| log.contains(kw))
+}
+
+/// 取日志里第一条含致命关键词的行（最贴近真实报错原因），没有则返回最后一条有效行。
+fn first_fatal_line(logs: &Arc<Mutex<HashMap<String, Vec<String>>>>, id: &str) -> Option<String> {
+    let map = logs.lock().unwrap();
+    let buf = map.get(id)?;
+    for l in buf.iter() {
+        let t = l.trim();
+        if FATAL_KEYWORDS.iter().any(|kw| t.contains(kw)) {
+            return Some(if t.chars().count() > 240 {
+                t.chars().take(240).collect::<String>() + "…"
+            } else {
+                t.to_string()
+            });
+        }
+    }
+    None
+}
+
 /// 把几条常见失败翻译成人话，比原样抛日志尾部更有用。
 fn friendly_note(logs: &Arc<Mutex<HashMap<String, Vec<String>>>>, id: &str) -> Option<String> {
     let joined = {
@@ -151,7 +188,7 @@ fn friendly_note(logs: &Arc<Mutex<HashMap<String, Vec<String>>>>, id: &str) -> O
                 .to_string(),
         );
     }
-    tail_log_line(logs, id)
+    first_fatal_line(logs, id).or_else(|| tail_log_line(logs, id))
 }
 
 // ===== 持久化：把设置写到应用配置目录（…/AppData/Roaming/<identifier>/config.json）=====
@@ -825,6 +862,9 @@ struct Recording {
     child: Child,
     started_at: std::time::SystemTime,
     output: String,
+    /// 用户是否主动点了「停止」（向 stdin 写了 `q`）。用来区分「正常收尾」与「真失败」，
+    /// 因为 ffmpeg 被 q 中断时退出码非 0，但那其实是预期的成功停止。
+    graceful: bool,
 }
 
 /// 一个采集设备（来自 `ffmpeg -list_devices 1 -f dshow -i dummy`）。
@@ -839,17 +879,19 @@ pub struct DeviceItem {
     pub identifier: String,
 }
 
-/// 一个物理显示器（来自 `ffmpeg -f gdigrab -list_displays -i desktop`）。
+/// 一个物理显示器（由 Win32 `EnumDisplayMonitors` 枚举得到）。
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DisplayItem {
-    pub x: u32,
-    pub y: u32,
+    /// 显示器左上角坐标（虚拟桌面坐标系；副屏若在主屏左/上方则可为负）。
+    /// 直接作为 gdigrab 的 `-offset_x` / `-offset_y` 使用。
+    pub x: i32,
+    pub y: i32,
     pub width: u32,
     pub height: u32,
-    /// 相对屏幕宽度归一化的位置，`primary` 表示主屏（Windows 下 x=0 的那个）
+    /// 归一化位置（前端当前未使用，占位为 0）。
     pub normalized_x: f64,
-    /// gdigrab 的显示器索引（从 1 开始），可直接用于 `-offset_x` 的参考
+    /// 显示器序号（从 1 开始），仅用于 UI 展示。
     pub index: u32,
 }
 
@@ -885,61 +927,101 @@ fn run_capture(bin: &str, args: &[&str], timeout: std::time::Duration) -> Option
     Some(format!("{}\n{}", stdout, stderr))
 }
 
-/// 列出物理显示器（Windows gdigrab）。命令故意让 ffmpeg 失败退出，只为拿 stderr 里的表。
-#[tauri::command]
-pub fn list_displays(state: State<FfmpegState>) -> Vec<DisplayItem> {
-    let bin = state.ffmpeg_path();
-    let out = match run_capture(
-        &bin,
-        &["-f", "gdigrab", "-list_displays", "-i", "desktop"],
-        std::time::Duration::from_secs(10),
-    ) {
-        Some(s) => s,
-        None => return Vec::new(),
+// ===== 显示器枚举：走 Win32 API（gdigrab 不支持列出显示器）=====
+#[repr(C)]
+struct Rect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+#[repr(C)]
+struct MonitorInfo {
+    cb_size: u32,
+    rc_monitor: Rect,
+    rc_work: Rect,
+    dw_flags: u32,
+}
+
+#[link(name = "user32")]
+extern "system" {
+    fn EnumDisplayMonitors(
+        hdc: *mut std::ffi::c_void,
+        lprc_clip: *const Rect,
+        lpfn_enum: extern "system" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, *const Rect, isize) -> i32,
+        dw_data: isize,
+    ) -> i32;
+    fn GetMonitorInfoW(hmonitor: *mut std::ffi::c_void, lpmi: *mut MonitorInfo) -> i32;
+}
+
+extern "system" fn monitor_enum_proc(
+    hmonitor: *mut std::ffi::c_void,
+    _hdc: *mut std::ffi::c_void,
+    _rect: *const Rect,
+    lparam: isize,
+) -> i32 {
+    // lparam 是调用方传入的 &mut Vec<DisplayItem> 指针；枚举是同步的，
+    // 函数返回前回调已结束，故该指针在回调期间始终有效。
+    let list = unsafe { &mut *(lparam as *mut Vec<DisplayItem>) };
+    let mut mi = MonitorInfo {
+        cb_size: std::mem::size_of::<MonitorInfo>() as u32,
+        rc_monitor: Rect { left: 0, top: 0, right: 0, bottom: 0 },
+        rc_work: Rect { left: 0, top: 0, right: 0, bottom: 0 },
+        dw_flags: 0,
     };
-    // 输出形如：
-    //   Found monitor at (0,0) with dimensions 1920x1080, relative position 0%
-    let mut items = Vec::new();
-    let mut idx = 1u32;
-    for line in out.lines() {
-        let l = line.trim();
-        if !l.starts_with("Found monitor at") {
-            continue;
-        }
-        let inner = match l.trim_start_matches("Found monitor at").trim().strip_prefix('(') {
-            Some(v) => v,
-            None => continue,
-        };
-        let xy = match inner.split(')').next() {
-            Some(v) => v.trim(),
-            None => continue,
-        };
-        let mut coords = xy.split(',');
-        let x: u32 = coords.next().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
-        let y: u32 = coords.next().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
-        let rest = inner.split(')').nth(1).unwrap_or("");
-        let dims = rest.split(' ').nth(1).unwrap_or("");
-        let mut wh = dims
-            .trim_start_matches("with dimensions ")
-            .split('x');
-        let w: u32 = wh.next().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
-        let h: u32 = wh.next().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
-        let rel = rest.rsplit(' ').next().unwrap_or("0%");
-        let rel_pct: u32 = rel.trim_end_matches('%').parse().unwrap_or(0);
-        items.push(DisplayItem {
-            x,
-            y,
-            width: w,
-            height: h,
-            normalized_x: rel_pct as f64 / 100.0,
-            index: idx,
-        });
-        idx += 1;
+    // 拿不到信息就跳过这块屏，但继续枚举其余显示器
+    if unsafe { GetMonitorInfoW(hmonitor, &mut mi) } == 0 {
+        return 1;
     }
-    items
+    let r = mi.rc_monitor;
+    list.push(DisplayItem {
+        x: r.left,
+        y: r.top,
+        width: (r.right - r.left) as u32,
+        height: (r.bottom - r.top) as u32,
+        // 前端未使用；主屏在 Windows 虚拟桌面里固定位于 (0,0)
+        normalized_x: 0.0,
+        index: list.len() as u32 + 1,
+    });
+    1
+}
+
+/// 列出 Windows 物理显示器。
+///
+/// 注意：gdigrab（ffmpeg 的 GDI 抓取设备）**不支持**「列出显示器」——
+/// `ffmpeg -f gdigrab -list_displays -i desktop` 会直接报
+/// `Unrecognized option 'list_displays'`，ffmpeg 命令行拿不到任何显示器列表，
+/// 原先解析器期待的 `Found monitor at ...` 格式也从未存在。
+///
+/// 因此这里改为调用 Win32 API（`EnumDisplayMonitors` + `GetMonitorInfoW`），
+/// 这正是 gdigrab 内部用来定位显示器的同一套 API，能拿到真实的虚拟桌面坐标、
+/// 尺寸与主屏标记。坐标系为 Windows 虚拟桌面：副屏若在主屏左/上方则为负值，
+/// 可直接作为 gdigrab 的 `-offset_x` / `-offset_y`（ffmpeg 文档确认支持负值）。
+#[tauri::command]
+pub fn list_displays(_state: State<FfmpegState>) -> Vec<DisplayItem> {
+    let mut monitors: Vec<DisplayItem> = Vec::new();
+    let ptr = &mut monitors as *mut Vec<DisplayItem> as isize;
+    unsafe {
+        EnumDisplayMonitors(
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            monitor_enum_proc,
+            ptr,
+        );
+    }
+    monitors
 }
 
 /// 列出 DShow 视频/音频设备（Windows）。失败时返回空数组，前端回退到占位提示。
+///
+/// ffmpeg 7.x 的真实输出形如（类型 `video`/`audio` 直接标在设备名同一行的括号里）：
+///   [dshow @ ...] "Integrated Camera" (video)
+///   [dshow @ ...]   Alternative name "@device_pnp_..."
+///   [dshow @ ...] "麦克风阵列 (适用于数字麦克风的英特尔® 智音技术)" (audio)
+///   [dshow @ ...]   Alternative name "@device_cm_..."
+/// 较老版本则是「DirectShow video devices / audio devices」段标题 + 缩进的
+/// `"设备名"` 行（类型由段标题决定）。两种格式这里都兼容。
 #[tauri::command]
 pub fn list_devices(state: State<FfmpegState>) -> Vec<DeviceItem> {
     let bin = state.ffmpeg_path();
@@ -956,45 +1038,59 @@ pub fn list_devices(state: State<FfmpegState>) -> Vec<DeviceItem> {
     let mut in_audio = false;
     for line in out.lines() {
         let l = line.trim();
-        if l.starts_with("[dshow @") && l.contains("Found device") {
-            // 形如： [dshow @ 0x...] Found device "笔记本的摄像头" on "video" at index 0.
-            let Some(body) = l.find("Found device") else { continue };
-            let body = &l[body..];
-            let Some(name) = body.strip_prefix(" \"") else { continue };
-            let Some(rest) = name.split("\"").nth(1) else { continue };
-            // rest 形如: " on "video" at index 0.
-            let Some(kind_start) = rest.find("on \"") else { continue };
-            let kind_part = &rest[kind_start + 4..];
-            let Some(kind_end) = kind_part.find('"') else { continue };
-            let kind = &kind_part[..kind_end];
-            let device_name = format!("{} [DShow]", name);
-            let Some(idx_start) = kind_part[kind_end..].find("index ") else { continue };
-            let after = &kind_part[kind_end..][idx_start + 6..];
-            let identifier = after.trim().trim_end_matches('.').trim().to_string();
-            match kind {
-                "video" => in_video = true,
-                "audio" => in_audio = true,
-                _ => {}
-            }
-            items.push(DeviceItem {
-                kind: kind.to_string(),
-                name: device_name,
-                identifier,
-            });
-        } else if l.starts_with("[dshow @") && (l.contains("video:") || l.contains("audio:")) {
-            // 分组小标题，用于切换 video/audio 上下文
-            if l.contains("video:") {
-                in_video = true;
-                in_audio = false;
-            } else if l.contains("audio:") {
-                in_audio = true;
-                in_video = false;
-            }
-        } else if l.starts_with("  ") && (in_video || in_audio) {
-            // dshow 的 list_devices 里 "Found device" 是唯一的设备条目行；
-            // 缩进的其它行是设备属性（Driver/Video Standard 等），跳过。
+        if !l.starts_with("[dshow @") {
             continue;
         }
+        // 段标题（老格式）：切换 video/audio 上下文
+        if l.contains("DirectShow video devices") {
+            in_video = true;
+            in_audio = false;
+            continue;
+        } else if l.contains("DirectShow audio devices") {
+            in_audio = true;
+            in_video = false;
+            continue;
+        }
+        // 属性行（如 `  Alternative name "..."`）跳过
+        if l.contains("Alternative name") {
+            continue;
+        }
+        // 取 [dshow @ ...] 之后的内容
+        let Some(bracket_end) = l.find(']') else { continue };
+        let after = l[bracket_end + 1..].trim_start();
+        if after.is_empty() {
+            continue;
+        }
+        // 提取引号里的设备名（第一个 " 到匹配的 " 之间）
+        let Some(q1) = after.find('"') else { continue };
+        let rest = &after[q1 + 1..];
+        let Some(q2) = rest.find('"') else { continue };
+        let device_name = rest[..q2].trim();
+        if device_name.is_empty() {
+            continue;
+        }
+        // 设备名之后的尾串：新格式为 " (video)" / " (audio)"
+        let tail = rest[q2 + 1..].trim();
+        let kind = if tail == "(video)" {
+            "video"
+        } else if tail == "(audio)" {
+            "audio"
+        } else if in_video {
+            // 老格式：无内联类型，依赖段标题上下文
+            "video"
+        } else if in_audio {
+            "audio"
+        } else {
+            // 既无内联类型、又不在任何段标题上下文中：无法确定类型，跳过
+            continue;
+        };
+        items.push(DeviceItem {
+            kind: kind.to_string(),
+            name: format!("{} [DShow]", device_name),
+            // dshow 用设备名（而非序号）引用，identifier 直接填设备名，
+            // 前端 qDevice() 会加引号拼成 audio="设备名"。
+            identifier: device_name.to_string(),
+        });
     }
     items
 }
@@ -1083,6 +1179,7 @@ pub fn start_record(app: AppHandle, state: State<FfmpegState>, opts: RecordStart
         child,
         started_at: std::time::SystemTime::now(),
         output,
+        graceful: false,
     });
     let _ = app.emit(
         "record-progress",
@@ -1101,8 +1198,10 @@ pub fn start_record(app: AppHandle, state: State<FfmpegState>, opts: RecordStart
 pub fn stop_record(state: State<FfmpegState>) -> Result<(), String> {
     let mut rec = state.record.lock().unwrap();
     if let Some(r) = rec.as_mut() {
-        let stdin = r.child.stdin.take();
-        if let Some(mut stdin) = stdin {
+        // 标记为「主动停止」，让监视器把它当成正常收尾而非失败。
+        r.graceful = true;
+        // 向 ffmpeg 的 stdin 写 `q`，让它写完容器尾部（moov / seek head）后自然退出。
+        if let Some(mut stdin) = r.child.stdin.take() {
             let _ = stdin.write_all(b"q");
             let _ = stdin.flush();
         }
@@ -1134,66 +1233,101 @@ pub fn record_status(state: State<FfmpegState>) -> RecordStatus {
     }
 }
 
-/// 在录制进程被创建后**后台**等待其退出，把最终状态推给前端。
-/// `start_record` 里调用一次即可，避免前端轮询超时误判。
+/// 在录制进程被创建后**后台**监听其退出，把最终状态推给前端。
+/// `start_record` 里调用一次即可。
 ///
-/// 判定 done 还是 failed 的规则（关键，别改错）：
-/// 录制场景下 ffmpeg 几乎总会以非零退出码结束——写入 `q` 后它走的是
-/// "interrupted by user" 路径，退出码非 0，但这是**预期的优雅收尾**。
-/// 因此真正的失败特征不是退出码，而是日志里出现错误标记
-/// （`Error` / `Invalid` / `No such` / `Permission denied` 等），
-/// 或者根本没出现任何收尾痕迹。
+/// 关键约束：`Recording`（含 child）在整个录制期间**必须留在** `state.record` 里，
+/// 否则 `stop_record` 拿不到 child 的 stdin 写 `q` 做优雅停止。所以这里只确认存在、
+/// 并不取走所有权；退出判定放到子线程轮询 `try_wait` 里，进程真正退出后才 `take` 清空槽位。
+///
+/// done / failed 判定（关键）：
+/// ffmpeg 被 `q` 中断时退出码非 0、且日志里常出现 "Conversion failed" 之类字眼，
+/// 但那其实是**预期的正常收尾**。因此这里优先看 `Recording.graceful`——
+/// 用户主动停止过就直接算 done（除非日志出现真正致命的错误标记）。
 pub fn spawn_record_watch(app: AppHandle, state: State<FfmpegState>, id_snapshot: String) {
-    let app2 = app.clone();
+    // 录制期间 child 必须留在 state.record，stop_record 才能拿到 stdin 写 q。
+    // 这里只确认存在，不取走所有权。
+    if state.record.lock().unwrap().is_none() {
+        return;
+    }
+    let record = state.record.clone();
     let logs = state.logs.clone();
-    let rec_mutex = {
-        // 取出 child 的所有权，等它退出后再释放 record 槽位。
-        // 注意：这里**不能**持有 MutexGuard 跨 spawn，否则会死锁。
-        let mut rec = state.record.lock().unwrap();
-        rec.take()
+    let id = if id_snapshot.is_empty() {
+        "record".to_string()
+    } else {
+        id_snapshot
     };
-    let Some(recording) = rec_mutex else { return };
-    let id = if id_snapshot.is_empty() { "record".into() } else { id_snapshot };
 
-    tauri::async_runtime::spawn(async move {
-        // wait_with_output 阻塞等待子进程退出并收集 stdout/stderr（stderr 已被消费线程接管，
-        // 这里拿到的只是没被消费的剩余部分——通常是 0 字节，因为 ffmpeg 主要输出在 stderr）。
-        let output = recording.child.wait_with_output();
-
-        let (final_state, note) = match output {
-            Err(e) => {
-                // wait_with_output 自己出错（极少见），按失败处理
-                ("failed", Some(format!("等待录制进程失败：{e}")))
-            }
-            Ok(out) => {
-                let log_text = {
-                    let map = logs.lock().unwrap();
-                    map.get(&id).map(|v| v.join("\n")).unwrap_or_default()
-                };
-                // 真失败的特征：日志里有 ffmpeg 的错误标记。
-                // 排除掉一些常见但非错误的词（如 "error" 出现在选项名里的场景较少）。
-                let is_err = log_text.contains("Error opening")
-                    || log_text.contains("Invalid argument")
-                    || log_text.contains("Permission denied")
-                    || log_text.contains("No such file")
-                    || log_text.contains("Conversion failed")
-                    || log_text.contains("av_format"); // avformat_open_input 失败
-                if is_err {
-                    let n = friendly_note(&logs, &id).unwrap_or_else(|| {
-                        "录制过程中 ffmpeg 报错，输出文件可能损坏。".into()
-                    });
-                    ("failed", Some(n))
-                } else if !out.status.success() {
-                    // 退出码非 0 但日志里没明显错误 → 通常是用户写 q 后的正常收尾，
-                    // 算 done（容器已经写完，文件可播放）。
-                    ("done", None)
-                } else {
-                    ("done", None)
+    // 用独立线程轮询子进程退出（try_wait 非阻塞），不占用 async 运行时。
+    std::thread::spawn(move || {
+        // 轮询等待子进程退出（每 300ms 探一次）
+        let mut exited = false;
+        loop {
+            let status = {
+                let mut rec = record.lock().unwrap();
+                match rec.as_mut() {
+                    Some(r) => match r.child.try_wait() {
+                        Ok(Some(_)) => Some(true), // 已退出
+                        Ok(None) => Some(false),   // 运行中
+                        Err(_) => None,            // try_wait 出错
+                    },
+                    None => None, // 槽位已被清空（异常）
                 }
+            };
+            match status {
+                Some(true) => {
+                    exited = true;
+                    break;
+                }
+                Some(false) => {} // 继续轮询
+                None => break,    // 出错或槽位丢失，退出循环
             }
+            std::thread::sleep(std::time::Duration::from_millis(300));
+        }
+
+        if !exited {
+            // 进程没正常退出，按取消处理
+            let _ = app.emit(
+                "record-progress",
+                serde_json::json!({ "isRecording": false, "state": "canceled" }),
+            );
+            return;
+        }
+
+        // 进程已退出：取出录制会话并清空槽位
+        let recording = record.lock().unwrap().take();
+        let Some(recording) = recording else {
+            let _ = app.emit(
+                "record-progress",
+                serde_json::json!({ "isRecording": false, "state": "canceled" }),
+            );
+            return;
         };
 
-        let _ = app2.emit(
+        let log_text = {
+            let map = logs.lock().unwrap();
+            map.get(&id).map(|v| v.join("\n")).unwrap_or_default()
+        };
+        // 真正致命的错误标记（与「用户主动停止」区分开）。注意：不再用 "Conversion failed"，
+        // 因为 ffmpeg 被 q 中断也会打印它，会导致正常停止被误判为失败。
+        let fatal = log_has_fatal(&log_text);
+
+        let (final_state, note): (&str, Option<String>) = if recording.graceful && !fatal {
+            // 用户主动停止（写了 q），视为正常收尾：容器尾部已写完，文件可播放。
+            ("done", None)
+        } else if fatal {
+            // 优先展示真正命中的报错行，而不是 libx264 的收尾统计行，
+            // 否则用户只会看到 “kb/s:...” 这种成功才有的摘要，完全看不出失败原因。
+            let n = first_fatal_line(&logs, &id)
+                .or_else(|| friendly_note(&logs, &id))
+                .unwrap_or_else(|| "录制过程中 ffmpeg 报错，输出文件可能损坏。".into());
+            ("failed", Some(n))
+        } else {
+            // 退出码非 0 但无致命错误 → 兜底为 done（正常 q 停止通常走这里）。
+            ("done", None)
+        };
+
+        let _ = app.emit(
             "record-progress",
             serde_json::json!({
                 "isRecording": false,

@@ -18,6 +18,9 @@ export interface RecordOpts {
   /** 显示器：gdigrab 的 -offset_x / -offset_y（屏幕坐标，不是索引） */
   displayX: number;
   displayY: number;
+  /** 所选显示器的真实像素尺寸，用作 gdigrab -video_size 锁定单屏捕获区域 */
+  captureW: number;
+  captureH: number;
   /** 摄像头设备名（dshow 的 video=...） */
   cameraDevice: string;
   /** 音频源：系统音频（屏幕录制）/ 麦克风（摄像头）/ 无声 */
@@ -48,17 +51,51 @@ function qDevice(s: string): string {
   return `"${s.replace(/"/g, '\\"')}"`;
 }
 
+/**
+ * 把「目标分辨率」选项转成 scale 滤镜串。
+ * - 未选（跟随源）或不合法 → null（不缩放，输出等于捕获区域尺寸）
+ * - 与捕获区域尺寸相同 → null（没必要缩放）
+ * - 否则 → "scale=W:H"，把全屏捕获缩放成目标输出分辨率
+ * 注意：输出尺寸强制偶数（H.264/yuv420 要求），避免奇数尺寸报错。
+ */
+function resolutionScale(
+  resolution: string,
+  captureW: number,
+  captureH: number
+): string | null {
+  if (!resolution) return null;
+  const m = /^(\d+)x(\d+)$/.exec(resolution.trim());
+  if (!m) return null;
+  const w = parseInt(m[1], 10);
+  const h = parseInt(m[2], 10);
+  if (!w || !h) return null;
+  if (captureW && captureH && w === captureW && h === captureH) return null;
+  const ew = w % 2 === 0 ? w : w - 1;
+  const eh = h % 2 === 0 ? h : h - 1;
+  return `scale=${ew}:${eh}`;
+}
+
 /** 屏幕录制（gdigrab，Windows）。输出名由调用方提供，已带时间戳。 */
 function buildScreen(o: RecordOpts): string[] {
   const parts: string[] = [];
-  // gdigrab：-offset_x/-offset_y 指定屏幕坐标（物理像素），-cursor on 捕获光标
+  // gdigrab：-offset_x/-offset_y 指定屏幕坐标（物理像素），-draw_mouse 1 捕获光标
+  // （注意：gdigrab 没有 -cursor 选项，控制光标的是 -draw_mouse 0/1）
   parts.push("-f gdigrab");
   parts.push("-offset_x", String(o.displayX));
   parts.push("-offset_y", String(o.displayY));
-  parts.push("-cursor on");
-  if (o.resolution) parts.push("-video_size", o.resolution);
+  parts.push("-draw_mouse 1");
+  // 始终用所选显示器的真实尺寸作为捕获区域（-video_size），确保只录那一块屏，
+  // 而不是 gdigrab 默认的「整个虚拟桌面（多屏拼接）」。
+  if (o.captureW && o.captureH) {
+    parts.push("-video_size", `${o.captureW}x${o.captureH}`);
+  }
   parts.push("-framerate", String(o.fps));
   parts.push("-i desktop");
+
+  // 输出分辨率：与捕获区域不一致时，用 scale 滤镜把全屏缩放成目标分辨率
+  // （旧逻辑直接把 -video_size 设成目标值，会变成「裁切左上角」而非「缩放全屏」）。
+  const scale = resolutionScale(o.resolution, o.captureW, o.captureH);
+  if (scale) parts.push("-vf", scale);
 
   // 音频：系统音频在 Windows 下没有原生 demuxer，gdigrab 只能录画面。
   // 因此系统音频必须走 dshow 的 "Stereo Mix" 之类，或者干脆提示用户。
@@ -94,8 +131,11 @@ function buildBoth(o: RecordOpts): string[] {
   parts.push("-f gdigrab");
   parts.push("-offset_x", String(o.displayX));
   parts.push("-offset_y", String(o.displayY));
-  parts.push("-cursor on");
-  if (o.resolution) parts.push("-video_size", o.resolution);
+  parts.push("-draw_mouse 1");
+  // 锁定单屏捕获区域（同 buildScreen）
+  if (o.captureW && o.captureH) {
+    parts.push("-video_size", `${o.captureW}x${o.captureH}`);
+  }
   parts.push("-framerate", String(o.fps));
   parts.push("-i desktop");
   // 输入 2：摄像头
@@ -108,20 +148,26 @@ function buildBoth(o: RecordOpts): string[] {
     parts.push("-i", qDevice(`audio=${o.audioDevice}`));
   }
 
-  // filter_complex：摄像头缩放到主画面的 camScalePct，放到右下角
-  const scale = Math.max(10, Math.min(80, Math.floor(o.camScalePct)));
+  // filter_complex：主画面（[0:v]）按需 scale 到目标输出分辨率，摄像头缩放到
+  // 主画面的 camScalePct 后放到右下角。bgScale 为 null 时主画面不缩放。
+  const camScale = Math.max(10, Math.min(80, Math.floor(o.camScalePct)));
+  const bgScale = resolutionScale(o.resolution, o.captureW, o.captureH);
   const filters: string[] = [];
-  filters.push(`[1:v]scale=iw*${scale}/100:-2[cam]`);
-  // 主画面铺满、摄像头放右下角（留 20 像素边距）
-  filters.push(
-    `[0:v][cam]overlay=W-w-20:H-h-20[out]`
-  );
+  if (bgScale) {
+    filters.push(`[0:v]${bgScale}[bg]`);
+    filters.push(`[1:v]scale=iw*${camScale}/100:-2[cam]`);
+    filters.push(`[bg][cam]overlay=W-w-20:H-h-20[out]`);
+  } else {
+    filters.push(`[1:v]scale=iw*${camScale}/100:-2[cam]`);
+    filters.push(`[0:v][cam]overlay=W-w-20:H-h-20[out]`);
+  }
   parts.push("-filter_complex", filters.join(";"));
 
-  // 映射：视频用 out，音频用输入 3（如果有）
+  // 映射：视频用 out，音频用输入 2（麦克风）。
+  // 输入顺序：0=桌面(gdigrab) / 1=摄像头(dshow video) / 2=麦克风(dshow audio)。
   parts.push("-map", "[out]");
   if (o.audioSource === "mic" && o.audioDevice) {
-    parts.push("-map", "3:a");
+    parts.push("-map", "2:a");
   } else {
     parts.push("-an");
   }
@@ -136,6 +182,12 @@ function buildEncode(o: RecordOpts): string[] {
   // preset：录制时 speed 档平衡 CPU 与码率，veryslow 会丢帧
   parts.push("-preset", "fast");
   parts.push("-g", String(o.fps * 2)); // 关键帧间隔 = 2 秒
+  // gdigrab 输入是 RGBA（4:4:4）。不指定 -pix_fmt 时，x264 会默认把画面编码成
+  // yuv444p（High 4:4:4 Profile）——多数播放器/硬件解码器拒绝播放，报「不受支持的格式」。
+  // 强制标准 yuv420p（4:2:0），兼容性最稳。
+  if (o.vEnc === "libx264") {
+    parts.push("-pix_fmt", "yuv420p");
+  }
   // 音频：mic 走 aac，无声则 -an
   if (o.audioSource !== "none" && o.audioDevice) {
     parts.push("-c:a", o.fmt === "mkv" ? "libmp3lame" : "aac");
