@@ -87,6 +87,7 @@ const cmd = computed(() =>
           <option :value="3">循环 3 次</option>
         </select>
         <p class="text-[11px] text-muted mt-1">采用 palettegen + paletteuse 两步法生成调色板，色彩比直接 -c:v gif 干净得多。</p>
+        <p class="text-[11px] text-muted mt-1">循环次数指「额外重复次数」：设为 2 表示连播 3 遍；设为「不循环」则播放一次即停。</p>
       </div>
     </div>
   </div>

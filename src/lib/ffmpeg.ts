@@ -909,7 +909,9 @@ export function buildGif(o: GifOpts): string {
   // split → palettegen 生成调色板 → paletteuse 套用
   vf.push("split[s0][s1]", "[s0]palettegen[p]", "[s1][p]paletteuse");
   parts.push(`-vf "${vf.join(",")}"`, "-an"); // GIF 无音轨
-  if (o.loop >= 0) parts.push(`-loop ${o.loop}`);
+  // -loop 必须无条件写出：gif muxer 的默认值是 0（无限循环），
+  // 若「不循环 (-1)」时不写该参数，反而会拿到无限循环，与用户意图完全相反。
+  parts.push(`-loop ${o.loop}`);
   const base = baseName(o.input).replace(/\.[^./\\]+$/, "") || "output";
   parts.push(outArg(`${base}.gif`));
   return ffmpegCmd(parts.join(" "));
