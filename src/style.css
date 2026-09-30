@@ -6,22 +6,36 @@
 :root {
   --bg: 246 244 254; /* 页面底色 淡紫 */
   --panel: 255 255 255; /* 卡片/侧栏 */
-  --line: 224 218 242; /* 边框 */
+  --line: 224 218 242; /* 边框 / 次级面（chip） */
   --text: 30 27 51; /* 正文 深紫黑 */
   --muted: 107 101 132; /* 次要文字 */
-  --brand: 124 58 237; /* 紫 violet-600 */
+  --brand: 124 58 237; /* 紫 violet-600（实心面：按钮底） */
+  --brand-fg: 124 58 237; /* 紫（文字/图标用；暗色下单独调亮） */
   --brand-h: 109 40 217;
   --on-brand: 255 255 255;
+  /* 状态色：亮色用 600 系（白底够对比），暗色用 400 系（深底够对比） */
+  --ok: 4 120 87; /* emerald-700：600 系在白底上只有 3.8:1，小字不够 */
+  --warn: 180 83 9; /* amber-700 */
+  --err: 220 38 38; /* red-600 */
+  --card-shadow: 0 1px 3px rgb(30 27 51 / 0.06);
+  color-scheme: light;
 }
 html.dark {
   --bg: 15 23 42;
   --panel: 30 41 59;
   --line: 51 65 85;
-  --text: 248 250 252;
-  --muted: 148 163 184;
-  --brand: 139 92 246;
+  --text: 237 242 252; /* 略降亮度，纯白在深底上太刺眼 */
+  --muted: 156 170 190; /* 比 slate-400 稍亮：chip 背景(--line)上的小字才够对比 */
+  --brand: 139 92 246; /* violet-500：实心按钮底，配白字 */
+  --brand-fg: 167 139 250; /* violet-400：文字/图标用，深面板上 5.4:1 */
   --brand-h: 124 58 237;
   --on-brand: 255 255 255;
+  --ok: 52 211 153;
+  --warn: 251 191 36;
+  --err: 248 113 113;
+  /* 暗色下卡片投影必须是黑色：沿用 --text（近白）会变成一圈白晕 */
+  --card-shadow: 0 1px 3px rgb(0 0 0 / 0.35);
+  color-scheme: dark;
 }
 
 html,
@@ -29,8 +43,16 @@ body,
 #app {
   height: 100%;
 }
+/* 关键：窗口底色（tauri.conf.json 的 backgroundColor）是白色，而页面根原本没有任何
+   元素绘制背景 —— 暗色下所有「未绘制区域」会直接露出白底：页面大片发白、
+   顶栏 bg-panel/60 半透明叠在白底上被冲成灰色。这里给 html/body 铺主题底色兜底。 */
+html {
+  background: rgb(var(--bg));
+}
 body {
   margin: 0;
+  background: rgb(var(--bg));
+  color: rgb(var(--text));
 }
 
 ::-webkit-scrollbar {
@@ -47,11 +69,17 @@ body {
 
 .nav-active {
   background: linear-gradient(90deg, rgb(var(--brand) / 0.22), rgb(var(--brand) / 0.10));
-  color: rgb(var(--brand));
+  color: rgb(var(--brand-fg));
   box-shadow: inset 3px 0 0 0 rgb(var(--brand));
 }
 .nav-active .nav-ico {
-  color: rgb(var(--brand));
+  color: rgb(var(--brand-fg));
+}
+/* 文字/图标场景的品牌色统一走 --brand-fg：暗色下 --brand(violet-500) 在深色面板
+   上只有约 3.5:1，实心按钮(bg-brand + 白字)仍用 --brand 不变。
+   特异性 (0,2,1) 高于 Tailwind 的 text-brand / hover:text-brand (0,2,0)，故能覆盖。 */
+html.dark .text-brand {
+  color: rgb(var(--brand-fg));
 }
 .seg-btn.active,
 .chip.active,
@@ -67,7 +95,7 @@ body {
 .card {
   background: rgb(var(--panel));
   border: 1px solid rgb(var(--line));
-  box-shadow: 0 1px 3px rgb(var(--text) / 0.06);
+  box-shadow: var(--card-shadow);
 }
 .cmd {
   font-family: "JetBrains Mono", monospace;

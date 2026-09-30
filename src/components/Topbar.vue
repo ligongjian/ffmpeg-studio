@@ -29,7 +29,8 @@ const badge = computed(() => store.tasks.length);
 </script>
 
 <template>
-  <header class="h-16 shrink-0 flex items-center justify-between px-6 border-b border-panel2 bg-panel/60 backdrop-blur">
+  <!-- bg-panel/80 而非 /60：页面底色比卡片更暗，半透明比例越低顶栏越被衬得发灰 -->
+  <header class="h-16 shrink-0 flex items-center justify-between px-6 border-b border-panel2 bg-panel/80 backdrop-blur">
     <div class="flex items-center gap-3">
       <button
         class="lg:hidden w-9 h-9 rounded-lg border border-panel2 flex items-center justify-center hover:border-brand transition-colors cursor-pointer"

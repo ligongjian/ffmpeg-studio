@@ -9,6 +9,14 @@
       href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
+    <script>
+      // 首屏防闪烁：主题由 store 在 JS 加载后写入 html.dark，等到那时再切换会先闪一帧亮色。
+      // 这里在样式生效前同步读一次 localStorage，先把 dark 类挂上。
+      try {
+        if (localStorage.getItem("ffs-theme") === "dark")
+          document.documentElement.classList.add("dark");
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="app"></div>

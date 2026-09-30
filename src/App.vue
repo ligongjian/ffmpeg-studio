@@ -28,7 +28,8 @@ function toggleSidebar() {
 
 <template>
   <a href="#content" class="skip-link bg-brand text-white px-4 py-2 rounded-lg text-sm font-bold shadow-glow">跳到主内容</a>
-  <div class="flex h-screen overflow-hidden">
+  <!-- 根节点显式铺 bg-ink：窗口底色是白色，任何未绘制区域都会露白（暗色下尤其明显） -->
+  <div class="flex h-screen overflow-hidden bg-ink">
     <Sidebar :open="sidebarOpen" @close="sidebarOpen = false" />
     <div
       v-if="sidebarOpen"

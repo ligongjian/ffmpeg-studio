@@ -44,7 +44,7 @@ const NAV: { tab: string; label: string; icon: string }[] = [
       <a
         v-for="n in NAV"
         :key="n.tab"
-        class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors hover:bg-panel2/50"
+        class="nav-item flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors hover:bg-panel2/50"
         :class="{ 'nav-active': store.tab === n.tab }"
         tabindex="0"
         @click="setTab(n.tab); emit('close')"
