@@ -106,10 +106,11 @@ onUnmounted(() => {
           <button
             v-for="q in QUICK"
             :key="q.tab"
-            class="rounded-xl border border-panel2 bg-ink/40 py-3 text-sm font-medium hover:border-brand hover:text-brand transition-colors cursor-pointer"
+            class="rounded-xl border border-panel2 bg-ink/40 py-3 px-2 text-sm font-medium hover:border-brand hover:text-brand transition-colors cursor-pointer flex items-center justify-center gap-2"
             @click="setTab(q.tab)"
           >
-            {{ q.label }}
+            <span v-html="`<svg class='w-4 h-4 shrink-0' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'>${q.icon}</svg>`"></span>
+            <span>{{ q.label }}</span>
           </button>
         </div>
       </div>

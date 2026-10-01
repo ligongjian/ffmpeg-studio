@@ -50,6 +50,6 @@ export const TITLES: Record<string, [string, string]> = {
  * 直接由 NAV 派生（排除工作台自身与任务队列这类非处理页），
  * 保证新增模块后不会出现「侧栏有、快速开始没有」的不同步。
  */
-export const QUICK: { tab: string; label: string }[] = NAV.filter(
+export const QUICK: { tab: string; label: string; icon: string }[] = NAV.filter(
   (n) => n.tab !== "dashboard" && n.tab !== "tasks"
-).map((n) => ({ tab: n.tab, label: n.label }));
+).map((n) => ({ tab: n.tab, label: n.label, icon: n.icon }));
