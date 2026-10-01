@@ -395,6 +395,15 @@ export interface WatermarkOpts extends VideoEncOpts {
   fontfile?: string;
   /** 字幕文件路径 */
   sub?: string;
+  // ===== delogo 专用（消除水印）=====
+  /** 待消除区域左上角 x / y，单位像素（源分辨率坐标系） */
+  dx?: number;
+  dy?: number;
+  /** 待消除区域宽 / 高，单位像素 */
+  dw?: number;
+  dh?: number;
+  /** 让 ffmpeg 在画面上画出该区域的绿框，便于先确认坐标再正式跑 */
+  dshow?: boolean;
   /** 字幕字体大小（按源视频高度百分比，0 = 默认） */
   subFontsize?: number;
   /** 字幕输出容器 */
@@ -456,6 +465,20 @@ export function buildWatermark(o: WatermarkOpts): string {
   const base = baseName(o.input).replace(/\.[^./\\]+$/, "") || "output";
   const fmt = o.fmt || "mp4";
   const out = outArg(`${base}.watermarked.${fmt}`);
+
+  // 消除水印：用矩形周边像素插值填充。区域超出画面时 ffmpeg 会直接失败
+  // （实测 "Logo area is outside of the frame"），坐标由调用方按源分辨率校验。
+  if (o.tab === "delogo") {
+    // show=1 让 ffmpeg 画出绿框，先跑一小段确认坐标再正式处理，比反复试错快得多
+    const filter = [
+      `delogo=x=${o.dx ?? 0}:y=${o.dy ?? 0}:w=${o.dw ?? 0}:h=${o.dh ?? 0}`,
+      ...(o.dshow ? ["show=1"] : []),
+    ].join(":");
+    const dout = outArg(`${base}.delogoed.${fmt}`);
+    return ffmpegCmd(
+      `-i ${q(o.input)} -vf "${filter}" -map 0:v -map 0:a? ${videoEnc(o, "libx264")} -c:a copy ${dout}`
+    );
+  }
 
   if (o.tab === "image") {
     if (!o.image) {
