@@ -212,8 +212,10 @@
 
 ## 十、已知技术债
 
-- **动图 GIF 页**：不显示源时长（而它恰恰是最需要知道总时长的页面）；
-  不限时长时无防护，长片段可能产出数百 MB；未暴露 `paletteuse` 的 dither 抖动算法
-  与 `palettegen` 的 `max_colors`
-- **窗口底色**：`src-tauri/tauri.conf.json` 的 `backgroundColor` 仍为 `#ffffff`
-  （前端已铺主题底色兜底，若启动仍有白闪可改为 `#0f172a`，改配置需重编译）
+- **动图 GIF 页（已修复）**：源时长现在实时展示（含探测中/未知占位）；不限时长或长片段
+  会给出体积上限估算与告警（>30MB 或整段处理）；已暴露 `palettegen` 的 `max_colors`
+  （2~256）与 `paletteuse` 的 `dither`（none/bayer/floyd_steinberg/sierra2/sierra2_4a/
+  sierra3/burkes/atkinson/heckbert，默认 sierra2_4a）。
+- **窗口底色（已修复）**：`src-tauri/tauri.conf.json` 的 `backgroundColor` 由 `#ffffff`
+  改为 `#0f172a`，消除暗色启动时的白闪（亮色启动会有一帧极短的暗→亮，可接受；
+  改配置需重编译 `tauri dev` / `cargo build` 生效）。
