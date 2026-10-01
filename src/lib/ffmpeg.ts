@@ -571,8 +571,13 @@ function buildFade(o: FiltersOpts, duration: number): string[] {
   return chain;
 }
 
-/** 降噪 hqdn3d（luma_spatial:chroma_spatial:luma_tmp:chroma_tmp，默认值即合理） */
-function buildDenoise(): string {
+/**
+ * 视频降噪 hqdn3d（luma_spatial:chroma_spatial:luma_tmp:chroma_tmp，默认值即合理）。
+ *
+ * 函数名带 Video 是为了和音频页的 `buildAudioDenoise()` 区分：两者曾经都叫
+ * `buildDenoise`，在同一模块里后者会把前者覆盖掉，滤镜页的降噪开关直接失效。
+ */
+function buildVideoDenoise(): string {
   return "hqdn3d";
 }
 
@@ -582,7 +587,7 @@ export function buildFilters(o: FiltersOpts): string {
   if (o.cropOn) vf.push(buildCrop(o));
   if (o.rotateOn) vf.push(buildRotate(o));
   if (o.eqOn) vf.push(buildEq(o));
-  if (o.denoiseOn) vf.push(buildDenoise());
+  if (o.denoiseOn) vf.push(buildVideoDenoise());
   if (o.sharpenOn) vf.push(buildSharpen(o));
   if (o.fadeOn) vf.push(...buildFade(o, o.fadeOutStart));
   if (o.deintOn) vf.push("yadif");
@@ -916,7 +921,28 @@ export function buildGif(o: GifOpts): string {
   parts.push(outArg(`${base}.gif`));
   return ffmpegCmd(parts.join(" "));
 }
-export interface AudioOpts {
+/**
+ * 降噪参数。单独抽出是为了让页面能复用同一个 `buildAudioDenoise()` 预览滤镜片段，
+ * 不另写一份拼接逻辑（避免 UI 提示与实际命令漂移）。
+ */
+export interface DenoiseOpts {
+  /** 降噪算法：off = 不降噪；fft = afftdn（通用稳态噪声）；nlmeans = anlmdn（宽带噪声，很慢） */
+  denoise: string;
+  /** afftdn 降噪强度 nr：0.01 ~ 97，默认 12。越大越强，过大会削掉人声细节 */
+  denoiseNr: number;
+  /** afftdn 噪声底 nf：-80 ~ -20 dB，默认 -50。判定为噪声的电平阈值，值越大降噪越激进 */
+  denoiseNf: number;
+  /** afftdn 噪声类型：white / vinyl / shellac */
+  denoiseNt: string;
+  /** afftdn 噪声追踪 tn：噪声随时间变化（风扇、风声）时开启 */
+  denoiseTn: boolean;
+  /** anlmdn 降噪强度 s：默认 0.001（实用区间约 1e-4 ~ 1e-2） */
+  denoiseS: number;
+  /** anlmdn 平滑因子 m：1 ~ 1000，默认 11 */
+  denoiseM: number;
+}
+
+export interface AudioOpts extends DenoiseOpts {
   /** process = 对单个文件做音频处理；concat = 多个音频顺序拼接 */
   mode: "process" | "concat";
   /** process 模式的输入 */
@@ -990,9 +1016,46 @@ function audioEnc(fmt: string, wavDepth: number): string {
   return "pcm_s16le";
 }
 
-/** 通用 af 片段：淡入/淡出/音量/响度/去静音/自定义，按推荐顺序排列 */
+/** 数值收窄到区间内并去掉多余小数（避免命令里出现 12.000000001） */
+function clampNum(x: number, min: number, max: number, fallback: number): string {
+  const v = Number(x);
+  const n = Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback;
+  return String(Math.round(n * 1e6) / 1e6);
+}
+
+/** afftdn 的噪声类型只接受这三种，其它值一律回落白噪 */
+const NOISE_TYPES: Record<string, string> = { white: "w", vinyl: "v", shellac: "s" };
+
+/**
+ * 降噪滤镜片段；denoise=off 时返回空串（不进链）。
+ *
+ * 两个算法的取舍：
+ * - `afftdn`：基于 FFT 的谱减法，速度快，对稳态噪声（电流底噪、空调、风扇）效果好；
+ *   靠 nr/nf 控制强度，过强会出现"水下声/金属感"。
+ * - `anlmdn`：非局部均值，对宽带噪声更自然，但计算量极大（实测远慢于实时），
+ *   只适合短音频；p/r 用默认 patch/research 时长即可，只暴露强度与平滑。
+ */
+export function buildAudioDenoise(o: DenoiseOpts): string {
+  if (o.denoise === "fft") {
+    const nr = clampNum(o.denoiseNr, 0.01, 97, 12);
+    const nf = clampNum(o.denoiseNf, -80, -20, -50);
+    const nt = NOISE_TYPES[o.denoiseNt] || "w";
+    return `afftdn=nr=${nr}:nf=${nf}:nt=${nt}${o.denoiseTn ? ":tn=1" : ""}`;
+  }
+  if (o.denoise === "nlmeans") {
+    const s = clampNum(o.denoiseS, 1e-5, 10, 0.001);
+    const m = clampNum(o.denoiseM, 1, 1000, 11);
+    return `anlmdn=s=${s}:p=0.002:r=0.006:m=${m}`;
+  }
+  return "";
+}
+
+/** 通用 af 片段：降噪/淡入/淡出/音量/响度/去静音/自定义，按推荐顺序排列 */
 function buildAudioFilters(o: AudioOpts): string[] {
   const af: string[] = [];
+  // 降噪排在最前：先净化信号再增益，否则底噪会被音量/响度归一化一起放大
+  const dn = buildAudioDenoise(o);
+  if (dn) af.push(dn);
   if (o.fadeIn > 0) af.push(`afade=t=in:st=0:d=${o.fadeIn}`);
   if (o.fadeOut > 0) {
     // 淡出必须在结尾前开始：st = 总时长 - 淡出时长。不给 st 时 ffmpeg 默认从 0 秒

@@ -3,7 +3,7 @@ import { reactive, computed, watch, ref, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { store, pickInput, probeInput, setInputFile } from "../store";
-import { buildAudio, AUDIO_ONLY_FMT } from "../lib/ffmpeg";
+import { buildAudio, buildAudioDenoise, AUDIO_ONLY_FMT } from "../lib/ffmpeg";
 import { baseName } from "../lib/format";
 import CommandCard from "../components/CommandCard.vue";
 import SegGroup from "../components/SegGroup.vue";
@@ -47,6 +47,14 @@ const s = reactive({
   volumeGain: 0,
   silenceRemove: false,
   channels: 0,
+  // 降噪
+  denoise: "off",
+  denoiseNr: 12,
+  denoiseNf: -50,
+  denoiseNt: "white",
+  denoiseTn: false,
+  denoiseS: 0.001,
+  denoiseM: 11,
   /** WAV 位深（仅 wav 生效） */
   wavDepth: 16,
   /** 自定义音频滤镜链（高级） */
@@ -222,11 +230,31 @@ const cmd = computed(() =>
     volumeGain: s.volumeGain,
     silenceRemove: s.silenceRemove,
     channels: s.channels,
+    denoise: s.denoise,
+    denoiseNr: s.denoiseNr,
+    denoiseNf: s.denoiseNf,
+    denoiseNt: s.denoiseNt,
+    denoiseTn: s.denoiseTn,
+    denoiseS: s.denoiseS,
+    denoiseM: s.denoiseM,
     duration: totalDuration.value,
     wavDepth: s.wavDepth,
     customAf: s.customAf,
   })
 );
+
+// 降噪滤镜片段：直接复用命令构建器，界面显示的一定是真正进 -af 的字符串
+const denoiseFilter = computed(() => buildAudioDenoise(s));
+const denoiseHint = computed(() => {
+  switch (s.denoise) {
+    case "fft":
+      return "基于 FFT 的谱减法，速度快，适合电流底噪、空调 / 风扇这类稳态噪声；强度过高会有金属感，建议先用短片段试听。";
+    case "nlmeans":
+      return "非局部均值，对宽带噪声更自然，但计算量极大、远慢于实时，建议只用于几分钟以内的音频。";
+    default:
+      return "不降噪。只是想去掉首尾空白可勾选「去除首尾静音」，想统一音量可勾选「响度归一化」。";
+  }
+});
 </script>
 
 <template>
@@ -331,6 +359,69 @@ const cmd = computed(() =>
             />
           </div>
           <p class="mt-1 text-xs text-muted">{{ qualityHint }}</p>
+        </div>
+
+        <!-- 降噪：先净化信号再增益，因此排在音量之前 -->
+        <div class="rounded-xl border border-panel2 bg-ink/40 p-4 space-y-3">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-sm font-semibold">音频降噪</span>
+            <SegGroup
+              v-model="s.denoise"
+              :options="[
+                { value: 'off', label: '关闭' },
+                { value: 'fft', label: 'FFT 降噪' },
+                { value: 'nlmeans', label: '非局部均值' },
+              ]"
+            />
+          </div>
+
+          <template v-if="s.denoise === 'fft'">
+            <div class="grid md:grid-cols-2 gap-4">
+              <div>
+                <label class="text-xs text-muted">降噪强度 nr（0.01 – 97）</label>
+                <input type="number" min="0.01" max="97" step="1" v-model.number="s.denoiseNr" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" />
+                <p class="mt-1 text-[11px] text-muted">默认 12；越大越强，过高会削掉人声细节</p>
+              </div>
+              <div>
+                <label class="text-xs text-muted">噪声底 nf（dB，-80 – -20）</label>
+                <input type="number" min="-80" max="-20" step="1" v-model.number="s.denoiseNf" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" />
+                <p class="mt-1 text-[11px] text-muted">默认 -50；底噪明显时可提到 -40 左右</p>
+              </div>
+              <div>
+                <label class="text-xs text-muted">噪声类型</label>
+                <select v-model="s.denoiseNt" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none">
+                  <option value="white">白噪（通用底噪）</option>
+                  <option value="vinyl">黑胶唱片（vinyl）</option>
+                  <option value="shellac">虫胶唱片（shellac）</option>
+                </select>
+              </div>
+            </div>
+            <label class="flex items-center gap-2 cursor-pointer text-sm">
+              <input type="checkbox" v-model="s.denoiseTn" class="accent-brand" />
+              噪声追踪（噪声随时间变化时开启，如风扇、风声）
+            </label>
+          </template>
+
+          <template v-else-if="s.denoise === 'nlmeans'">
+            <div class="grid md:grid-cols-2 gap-4">
+              <div>
+                <label class="text-xs text-muted">降噪强度 s</label>
+                <input type="number" min="0.00001" max="10" step="0.0005" v-model.number="s.denoiseS" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" />
+                <p class="mt-1 text-[11px] text-muted">默认 0.001；常用区间 0.0005 – 0.005</p>
+              </div>
+              <div>
+                <label class="text-xs text-muted">平滑因子 m（1 – 1000）</label>
+                <input type="number" min="1" max="1000" step="1" v-model.number="s.denoiseM" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" />
+                <p class="mt-1 text-[11px] text-muted">默认 11；越大越平滑，过大声音会发糊</p>
+              </div>
+            </div>
+            <p class="text-[11px] text-warn">计算量极大、处理速度远慢于实时，建议只用于几分钟以内的音频</p>
+          </template>
+
+          <p class="text-[11px] text-muted">{{ denoiseHint }}</p>
+          <p v-if="denoiseFilter" class="text-[11px] text-muted">
+            滤镜：<span class="text-brand font-mono">{{ denoiseFilter }}</span>
+          </p>
         </div>
 
         <div class="grid md:grid-cols-2 gap-4">
