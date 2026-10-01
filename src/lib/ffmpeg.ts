@@ -960,6 +960,10 @@ export interface GifOpts {
   width: number;
   /** 循环：0=无限循环，-1=不循环，N=循环 N 次（GIF muxer 的 -loop 语义） */
   loop: number;
+  /** palettegen 调色板最大颜色数（2~256），越小体积越小但越色带 */
+  maxColors?: number;
+  /** paletteuse 抖动算法：none/bayer/floyd_steinberg/sierra2/sierra2_4a/sierra3/burkes/atkinson/heckbert */
+  dither?: string;
 }
 
 /** GIF 动图：palettegen + paletteuse 两步法（比直接 -c:v gif 色彩干净得多） */
@@ -971,7 +975,9 @@ export function buildGif(o: GifOpts): string {
   const vf: string[] = [`fps=${o.fps > 0 ? o.fps : 15}`];
   if (o.width > 0) vf.push(`scale=${o.width}:-1:flags=lanczos`);
   // split → palettegen 生成调色板 → paletteuse 套用
-  vf.push("split[s0][s1]", "[s0]palettegen[p]", "[s1][p]paletteuse");
+  const gen = o.maxColors && o.maxColors >= 2 && o.maxColors <= 256 ? `palettegen=max_colors=${o.maxColors}` : "palettegen";
+  const use = o.dither ? `paletteuse=dither=${o.dither}` : "paletteuse";
+  vf.push("split[s0][s1]", `[s0]${gen}[p]`, `[s1][p]${use}`);
   parts.push(`-vf "${vf.join(",")}"`, "-an"); // GIF 无音轨
   // -loop 必须无条件写出：gif muxer 的默认值是 0（无限循环），
   // 若「不循环 (-1)」时不写该参数，反而会拿到无限循环，与用户意图完全相反。
