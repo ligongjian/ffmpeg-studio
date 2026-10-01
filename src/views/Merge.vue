@@ -3,9 +3,10 @@ import { reactive, computed, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { buildMerge, buildConcatList, FMT_OPTIONS, CONCAT_LIST_NAME } from "../lib/ffmpeg";
 import { queueTask, resolveFfmpeg } from "../store";
-import { dirOf, baseName, s2hms } from "../lib/format";
+import { dirOf, baseName } from "../lib/format";
 import CommandCard from "../components/CommandCard.vue";
 import SegGroup from "../components/SegGroup.vue";
+import HwAccelSelect from "../components/HwAccelSelect.vue";
 
 /** 单个合并条目：path 是真实绝对路径 */
 type MergeItem = {
@@ -14,7 +15,13 @@ type MergeItem = {
   name: string;
 };
 
-const s = reactive({ mode: "concat" as "concat" | "filter", fmt: "mp4" });
+const s = reactive({
+  mode: "concat" as "concat" | "filter",
+  fmt: "mp4",
+  /** 滤镜拼接的重编码质量（CRF） */
+  crf: 23,
+  hwaccel: "",
+});
 
 let seq = 0;
 const files = reactive<MergeItem[]>([]);
@@ -23,7 +30,13 @@ const files = reactive<MergeItem[]>([]);
 const cwd = computed(() => (files.length ? dirOf(files[0].path) || undefined : undefined));
 
 const cmd = computed(() =>
-  buildMerge({ mode: s.mode, files: files.map((f) => f.path), fmt: s.fmt })
+  buildMerge({
+    mode: s.mode,
+    files: files.map((f) => f.path),
+    fmt: s.fmt,
+    crf: s.crf,
+    hwaccel: s.hwaccel,
+  })
 );
 
 const listTxt = computed(() => buildConcatList(files.map((f) => f.path)));
@@ -34,17 +47,6 @@ const outputName = computed(() => {
   const base = baseName(files[0].path).replace(/\.[^./\\]+$/, "") || "merged";
   return `${base}.merged.${s.fmt}`;
 });
-
-const totalSec = computed(() => 0);
-const totalBytes = computed(() => 0);
-const totalProbing = computed(() => false);
-
-function fmtBytes(b: number): string {
-  if (b >= 1024 ** 3) return `${(b / 1024 ** 3).toFixed(1)} GB`;
-  if (b >= 1024 ** 2) return `${(b / 1024 ** 2).toFixed(1)} MB`;
-  if (b >= 1024) return `${(b / 1024).toFixed(1)} KB`;
-  return `${b} B`;
-}
 
 /** 选中文件后写入列表。不探测元信息——之前 ffprobe 调用易卡死，列表只关心路径与顺序。 */
 async function addFiles() {
@@ -226,7 +228,7 @@ async function run() {
               流拼接零拷贝、最快，要求所有源编码/分辨率/采样率一致；不一致请选滤镜拼接。
             </template>
             <template v-else>
-              滤镜拼接会重编码（libx264 + aac），不同编码也能拼；但慢且体积略大。
+              滤镜拼接会重编码（H.264 + aac，可选硬件加速），不同编码也能拼；但比流拼接慢。
             </template>
           </p>
         </div>
@@ -241,6 +243,16 @@ async function run() {
             输出文件名：<span class="text-brand font-mono">{{ outputName }}</span>
           </p>
         </div>
+      </div>
+
+      <!-- 滤镜拼接才重编码；流拼接是 -c copy，编码参数不适用 -->
+      <div v-if="s.mode === 'filter'" class="grid md:grid-cols-2 gap-4">
+        <div>
+          <label class="text-xs text-muted">质量 (CRF，越小越清晰)</label>
+          <input type="number" min="0" max="51" step="1" v-model.number="s.crf" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" />
+          <p class="text-[11px] text-muted mt-1">音频统一重编码为 aac。</p>
+        </div>
+        <HwAccelSelect v-model="s.hwaccel" quality-hint="该 CRF 值会映射到 -cq / -global_quality" />
       </div>
 
       <div v-if="s.mode === 'concat' && files.length" class="mt-2">

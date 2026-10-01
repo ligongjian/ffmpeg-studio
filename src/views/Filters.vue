@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { reactive, computed, watch, ref, onMounted, onUnmounted } from "vue";
-import { store, pickInput, probeInput, inputCwd, setInputFile } from "../store";
+import { store, pickInput, inputCwd, setInputFile } from "../store";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { buildFilters, type FiltersOpts } from "../lib/ffmpeg";
 import { baseName } from "../lib/format";
 import CommandCard from "../components/CommandCard.vue";
+import HwAccelSelect from "../components/HwAccelSelect.vue";
 
 const s = reactive<{
   fmt: string;
   vEnc: string;
   crf: number;
+  /** 硬件加速编码器；选定后软件编码器（vEnc）被顶掉 */
+  hwaccel: string;
   audioMode: FiltersOpts["audioMode"];
   loudnormI: number;
   scaleOn: boolean; scaleW: number; scaleH: number;
@@ -27,6 +30,7 @@ const s = reactive<{
   fmt: "mp4",
   vEnc: "libx264",
   crf: 23,
+  hwaccel: "",
   audioMode: "copy",
   loudnormI: -16,
   scaleOn: false, scaleW: 1280, scaleH: 720,
@@ -93,6 +97,27 @@ function formatDur(d: number): string {
   return `${m}:${String(x).padStart(2, "0")}`;
 }
 
+/** 是否真的会重编码视频：任一视频滤镜开启即重编码（与 buildFilters 的判定同源） */
+const reencodes = computed(
+  () =>
+    s.scaleOn ||
+    s.cropOn ||
+    s.rotateOn ||
+    s.eqOn ||
+    s.denoiseOn ||
+    s.sharpenOn ||
+    s.fadeOn ||
+    s.deintOn ||
+    !!s.customVf.trim()
+);
+// 不重编码（视频流拷贝）或 WebM 容器时，硬件编码器都用不上
+const hwaccelUsable = computed(() => reencodes.value && s.fmt !== "webm");
+const hwaccelOffHint = computed(() =>
+  !reencodes.value
+    ? "未开启任何视频滤镜时视频流原样拷贝，不重编码"
+    : "WebM 容器只支持 VP8 / VP9 / AV1，硬件 H.264/HEVC 编码器不适用"
+);
+
 // 输出文件名预览
 const outputName = computed(() => {
   const base = baseName(inputName.value).replace(/\.[^./\\]+$/, "") || "output";
@@ -106,6 +131,7 @@ const cmd = computed(() =>
     fmt: s.fmt,
     vEnc: s.vEnc,
     crf: s.crf,
+    hwaccel: s.hwaccel,
     audioMode: s.audioMode,
     loudnormI: s.loudnormI,
     scaleOn: s.scaleOn, scaleW: s.scaleW, scaleH: s.scaleH,
@@ -357,6 +383,12 @@ function pick() {
             <label class="text-muted">CRF（质量） <span class="text-brand">{{ s.crf }}</span></label>
             <input type="range" min="0" max="51" step="1" v-model.number="s.crf" class="slider w-full" />
           </div>
+          <HwAccelSelect
+            v-model="s.hwaccel"
+            :disabled="!hwaccelUsable"
+            :off-hint="hwaccelOffHint"
+            quality-hint="该 CRF 值会映射到 -cq / -global_quality，同时顶掉上面的软件编码器"
+          />
         </div>
         <p class="text-[11px] text-muted">提示：勾选任何视频滤镜都会触发重新编码；未选视频滤镜时视频流原样拷贝。</p>
       </div>

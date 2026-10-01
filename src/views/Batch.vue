@@ -4,6 +4,7 @@ import { buildBatch, type BatchOpts } from "../lib/ffmpeg";
 import { invoke } from "@tauri-apps/api/core";
 import { queueTasks, resolveFfmpeg, pickRecordDir, pickFolderFiles } from "../store";
 import { baseName } from "../lib/format";
+import HwAccelSelect from "../components/HwAccelSelect.vue";
 
 const s = reactive({
   files: [] as string[],
@@ -12,6 +13,7 @@ const s = reactive({
   fmt: "mp4",
   vcodec: "libx264",
   acodec: "aac",
+  hwaccel: "",
   // ===== compress =====
   crf: 28,
   preset: "medium",
@@ -65,6 +67,21 @@ function clearFiles() {
   s.files = [];
 }
 
+/** 硬件加速只在「批量转换 / 批量压缩」且真的重编码视频时有意义 */
+const hwUsable = computed(() => {
+  if (s.op === "convert") return s.vcodec !== "copy" && !["webm", "gif", "mp3"].includes(s.fmt);
+  if (s.op === "compress") return s.fmt !== "webm";
+  return false;
+});
+const hwOffHint = computed(() => {
+  if (s.op === "convert") {
+    return s.vcodec === "copy"
+      ? "视频选择直接拷贝时不重编码"
+      : "WebM / GIF / 纯音频目标装不下硬件 H.264/HEVC 编码器";
+  }
+  return "WebM 容器只支持 VP8 / VP9 / AV1";
+});
+
 const items = computed(() =>
   buildBatch({
     files: s.files,
@@ -72,6 +89,7 @@ const items = computed(() =>
     fmt: s.fmt,
     vcodec: s.vcodec,
     acodec: s.acodec,
+    hwaccel: s.hwaccel,
     crf: s.crf,
     preset: s.preset,
     aext: s.aext,
@@ -275,6 +293,15 @@ async function copyAll() {
             />
           </div>
         </template>
+
+        <!-- 硬件加速：convert / compress 两个重编码操作共用 -->
+        <HwAccelSelect
+          v-if="s.op === 'convert' || s.op === 'compress'"
+          v-model="s.hwaccel"
+          :disabled="!hwUsable"
+          :off-hint="hwOffHint"
+          quality-hint="批量压缩时 CRF 映射到 -cq / -global_quality；批量转换只替换编码器名"
+        />
 
         <!-- extract -->
         <template v-if="s.op === 'extract'">

@@ -6,11 +6,23 @@ import { buildCut } from "../lib/ffmpeg";
 import { hms2s, s2hms, baseName } from "../lib/format";
 import CommandCard from "../components/CommandCard.vue";
 import SegGroup from "../components/SegGroup.vue";
+import HwAccelSelect from "../components/HwAccelSelect.vue";
 
 /** 入点与出点之间的最小间隔（秒） */
 const MIN_SPAN = 1;
 
-const s = reactive({ start: "00:00:25", end: "00:02:30", dur: "00:02:05", mode: "re", splitMode: "clip", segCount: 3, segDur: 60 });
+const s = reactive({
+  start: "00:00:25",
+  end: "00:02:30",
+  dur: "00:02:05",
+  mode: "re",
+  splitMode: "clip",
+  segCount: 3,
+  segDur: 60,
+  /** 重编码质量（CRF）；硬件加速时按编码器类型映射到 -cq / -global_quality */
+  crf: 23,
+  hwaccel: "",
+});
 
 // ===== 真实总长 =====
 // 原来总长写死成 00:04:12，拖到哪儿都是假的。现在选中输入文件后向后端探测，
@@ -105,6 +117,8 @@ const cmd = computed(() => {
     start: s.start,
     end: s.end,
     mode: s.mode as "re" | "copy",
+    crf: s.crf,
+    hwaccel: s.hwaccel,
     split:
       s.splitMode === "equal"
         ? { type: "equal", segDur: tv > 0 ? tv / Math.max(1, s.segCount) : s.segDur, count: s.segCount }
@@ -459,6 +473,16 @@ function normalize() {
           ]"
         />
       </div>
+
+      <!-- 重编码参数：快剪模式是 -c copy，编码器参数用不上 -->
+      <div v-if="s.mode === 're'" class="grid md:grid-cols-2 gap-4 mt-3">
+        <div>
+          <label class="text-xs text-muted">质量 (CRF，越小越清晰)</label>
+          <input type="number" min="0" max="51" step="1" v-model.number="s.crf" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none" />
+        </div>
+        <HwAccelSelect v-model="s.hwaccel" quality-hint="该 CRF 值会映射到 -cq / -global_quality" />
+      </div>
+      <p v-else class="text-[11px] text-muted mt-2">关键帧快剪为流拷贝（-c copy），不重编码，因此无需质量与硬件加速设置。</p>
     </div>
   </div>
 </template>

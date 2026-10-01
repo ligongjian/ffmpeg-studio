@@ -17,6 +17,7 @@ import {
 } from "../lib/ffmpeg";
 import CommandCard from "../components/CommandCard.vue";
 import SegGroup from "../components/SegGroup.vue";
+import HwAccelSelect from "../components/HwAccelSelect.vue";
 
 const s = reactive({
   mode: "push",
@@ -30,6 +31,8 @@ const s = reactive({
   gopSec: 2,
   audio: true,
   transcode: false,
+  /** 硬件加速编码器；推流 / 拉流转码时生效（码率控制模式） */
+  hwaccel: "",
   // ===== 拉流输出（可配置，不再写死 record.ts）=====
   /** 输出目录；留空则后端兜底到系统「视频」文件夹 */
   outDir: "",
@@ -93,6 +96,7 @@ function opts(preview: boolean): StreamOpts {
     gopSec: Number(s.gopSec) || 0,
     audio: s.audio,
     transcode: s.transcode,
+    hwaccel: s.hwaccel,
     input: inputName.value,
     outName: pullFileName(preview),
   };
@@ -201,6 +205,7 @@ function enqueue() {
             <label class="text-xs text-muted">输出帧率</label>
             <input v-model="s.fps" placeholder="如 30，留空=跟随源" class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none placeholder:text-muted/60" />
           </div>
+          <HwAccelSelect v-model="s.hwaccel" quality-hint="直播必须码率可控，走 -b:v 而非 -cq" />
           <label class="md:col-span-2 flex items-center gap-2 text-sm cursor-pointer select-none">
             <input type="checkbox" v-model="s.audio" class="accent-brand w-4 h-4" />
             包含音频（取消勾选则仅推视频流 <span class="font-mono">-an</span>）
@@ -265,6 +270,7 @@ function enqueue() {
               <option value="medium">medium（默认/最慢）</option>
             </select>
           </div>
+          <HwAccelSelect v-model="s.hwaccel" quality-hint="直播必须码率可控，走 -b:v 而非 -cq" />
         </template>
       </div>
     </div>

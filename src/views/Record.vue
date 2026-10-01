@@ -345,10 +345,6 @@ const modeLabel = computed(() => {
   return "画中画";
 });
 
-const selectedDisplay = computed(() => displays[s.displayIdx]);
-const selectedCamera = computed(() => cameras.find((c) => c.identifier === s.cameraDevice));
-const selectedMic = computed(() => mics.find((m) => m.identifier === s.audioDevice));
-
 // ===== 录制结束后的提示 =====
 const finishedInfo = computed(() => {
   if (store.recording) return null;

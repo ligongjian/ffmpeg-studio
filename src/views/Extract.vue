@@ -5,6 +5,7 @@ import { buildExtract, type ExtractOpts } from "../lib/ffmpeg";
 import { baseName } from "../lib/format";
 import CommandCard from "../components/CommandCard.vue";
 import SegGroup from "../components/SegGroup.vue";
+import HwAccelSelect from "../components/HwAccelSelect.vue";
 
 const s = reactive<{
   tab: ExtractOpts["tab"];
@@ -13,6 +14,8 @@ const s = reactive<{
   videoCodec: string;
   videoCrf: string;
   videoFmt: string;
+  /** 硬件加速编码器；仅「抽取视频 + 重编码」时生效 */
+  hwaccel: string;
   frameAt: string;
   frameFmt: string;
   thumbInterval: number;
@@ -25,6 +28,7 @@ const s = reactive<{
   videoCodec: "copy",
   videoCrf: "23",
   videoFmt: "mp4",
+  hwaccel: "",
   frameAt: "0",
   frameFmt: "png",
   thumbInterval: 10,
@@ -77,6 +81,7 @@ const cmd = computed(() =>
     videoCodec: s.videoCodec,
     videoCrf: s.videoCrf,
     videoFmt: s.videoFmt,
+    hwaccel: s.hwaccel,
     frameAt: s.frameAt,
     frameFmt: s.frameFmt,
     thumbInterval: s.thumbInterval,
@@ -170,6 +175,16 @@ const cmd = computed(() =>
             <option value="webm">WebM</option>
           </select>
         </div>
+        <HwAccelSelect
+          v-model="s.hwaccel"
+          :disabled="s.videoCodec === 'copy' || s.videoFmt === 'webm'"
+          :off-hint="
+            s.videoCodec === 'copy'
+              ? '直接拷贝不重编码，无需硬件加速'
+              : 'WebM 容器只支持 VP8 / VP9 / AV1，硬件 H.264/HEVC 编码器不适用'
+          "
+          quality-hint="该 CRF 值会映射到 -cq / -global_quality"
+        />
       </div>
 
       <!-- 抽取帧 -->

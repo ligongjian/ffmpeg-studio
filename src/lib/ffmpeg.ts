@@ -111,13 +111,8 @@ export function buildConvert(o: ConvertOpts): string {
   } else if (o.enc === "copy" && !o.hwaccel) {
     parts.push("-c copy");
   } else {
-    if (o.hwaccel) {
-      // NVENC / AMF 用 -cq，QSV 用 -global_quality
-      const q = o.hwaccel.includes("qsv") ? `-global_quality ${o.quality}` : `-cq ${o.quality}`;
-      parts.push(`-c:v ${o.hwaccel} ${q}`);
-    } else {
-      parts.push(`-c:v ${o.enc} -crf ${o.quality}`);
-    }
+    // 编码器与质量参数统一交给 videoEnc（软硬件差异只在那一个函数里）
+    parts.push(videoEnc({ hwaccel: o.hwaccel, crf: Number(o.quality) || 23 }, o.enc));
     if (vf.length) parts.push(`-vf ${vf.join(",")}`);
     parts.push(`-c:a ${o.aud}`);
   }
@@ -143,12 +138,44 @@ export interface CompressOpts {
   hwaccel: string;
 }
 
-/** 视频编码器选择：硬件加速优先，否则回退软件编码；质量参数按编码器类型适配 */
-function videoEnc(o: { hwaccel: string; crf: number; preset: string }, swEnc: string): string {
-  if (!o.hwaccel) return `-c:v ${swEnc} -crf ${o.crf} -preset ${o.preset}`;
-  // NVENC / AMF 用 -cq 控制质量（类 CRF），QSV 用 -global_quality；预设交编码器默认即可
+/**
+ * 视频编码参数。所有需要重编码的路径都应带这几个字段，并统一走 `videoEnc()`，
+ * 不要再各自写死 `-c:v libx264 -crf 23`。
+ */
+export interface VideoEncOpts {
+  /** 硬件加速编码器（h264_nvenc / hevc_qsv / h264_amf …）；空 = 软件编码 */
+  hwaccel: string;
+  /** 质量参数：软件编码即 CRF；硬件编码会按编码器类型映射 */
+  crf: number;
+  /** 软件编码的 -preset；空 = 不加（交给编码器默认，等效 medium） */
+  preset?: string;
+}
+
+/**
+ * 视频编码器唯一出口：硬件加速优先，否则回退软件编码。
+ *
+ * 质量参数的差异就收在这里：
+ * - 软件：CRF（x264/x265 语义，值越小越好）
+ * - NVENC / AMF：`-cq`（类 CRF，量级与 CRF 接近）
+ * - QSV：`-global_quality`
+ * 硬件路径不带 -preset：NVENC 用 -preset 是另一套命名（p1–p7 / slow…），
+ * 混用会直接报 "Unrecognized option"。
+ */
+export function videoEnc(o: VideoEncOpts, swEnc: string): string {
+  if (!o.hwaccel) {
+    return `-c:v ${swEnc} -crf ${o.crf}${o.preset ? ` -preset ${o.preset}` : ""}`;
+  }
   const q = o.hwaccel.includes("qsv") ? `-global_quality ${o.crf}` : `-cq ${o.crf}`;
   return `-c:v ${o.hwaccel} ${q}`;
+}
+
+/**
+ * 直播 / 采集场景的硬件编码：这类场景必须由码率控制（`-b:v`），
+ * CRF 模式会让带宽失控，所以不能复用上面的 `videoEnc()`。
+ */
+export function videoEncBitrate(o: { hwaccel: string; preset: string }, bitrate: string): string {
+  if (!o.hwaccel) return `-c:v libx264 -preset ${o.preset} -b:v ${bitrate}`;
+  return `-c:v ${o.hwaccel} -b:v ${bitrate}`;
 }
 
 export function buildCompress(o: CompressOpts): string {
@@ -170,7 +197,7 @@ export interface CutSplit {
   count?: number;
 }
 
-export interface CutOpts {
+export interface CutOpts extends VideoEncOpts {
   input: string;
   start: string;
   end: string;
@@ -183,7 +210,7 @@ export function buildCut(o: CutOpts): string {
   const base = baseName(o.input).replace(/\.[^./\\]+$/, "") || "output";
   // 拆分模式：用 segment muxer 一次性切成多段
   if (o.split && o.split.segDur > 0) {
-    const enc = o.mode === "copy" ? "-c copy" : "-c:v libx264 -crf 23 -c:a aac";
+    const enc = o.mode === "copy" ? "-c copy" : `${videoEnc(o, "libx264")} -c:a aac`;
     const out = outArg(`${base}.part.%03d.mp4`);
     return ffmpegCmd(
       `-i ${q(o.input)} -f segment -segment_time ${o.split.segDur} -reset_timestamps 1 ${enc} ${out}`
@@ -196,12 +223,13 @@ export function buildCut(o: CutOpts): string {
   parts.push(
     o.mode === "copy"
       ? `-c copy ${outArg(outName)}`
-      : `-c:v libx264 -crf 23 -c:a aac ${outArg(outName)}`
+      : `${videoEnc(o, "libx264")} -c:a aac ${outArg(outName)}`
   );
   return ffmpegCmd(parts.join(" "));
 }
 
-export interface MergeOpts {
+/** filter 模式必然重编码（concat 模式是 -c copy，用不上编码参数） */
+export interface MergeOpts extends VideoEncOpts {
   mode: "concat" | "filter";
   /** 文件绝对路径列表（顺序即合并顺序） */
   files: string[];
@@ -235,17 +263,18 @@ export function buildMerge(o: MergeOpts): string {
     // 走 list.txt；-safe 0 才允许绝对路径
     return ffmpegCmd(`-f concat -safe 0 -i ${CONCAT_LIST_NAME} -c copy ${out}`);
   }
+  const venc = `${videoEnc(o, "libx264")} -c:a aac`;
   if (!list.length) {
     // 没文件时给个能跑的占位（两个示例源），便于用户复制命令参考
     const inputs = `-i input1.mp4 -i input2.mp4`;
     return ffmpegCmd(
-      `${inputs} -filter_complex "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[v][a]" -map "[v]" -map "[a]" -c:v libx264 -crf 23 -c:a aac ${out}`
+      `${inputs} -filter_complex "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[v][a]" -map "[v]" -map "[a]" ${venc} ${out}`
     );
   }
   const inputs = list.map((f) => `-i ${q(f)}`).join(" ");
   const streams = list.map((_, i) => `[${i}:v][${i}:a]`).join("");
   return ffmpegCmd(
-    `${inputs} -filter_complex "${streams}concat=n=${list.length}:v=1:a=1[v][a]" -map "[v]" -map "[a]" -c:v libx264 -crf 23 -c:a aac ${out}`
+    `${inputs} -filter_complex "${streams}concat=n=${list.length}:v=1:a=1[v][a]" -map "[v]" -map "[a]" ${venc} ${out}`
   );
 }
 
@@ -265,6 +294,8 @@ export interface ExtractOpts {
   videoCodec: string;
   /** 视频 CRF，仅 videoCodec !== "copy" 时生效 */
   videoCrf: string;
+  /** 硬件加速编码器；仅「抽取视频 + 重编码」时生效 */
+  hwaccel: string;
   /** 视频容器：mp4 / mkv / mov / avi / webm */
   videoFmt: string;
   /** 单帧时间点，如 "00:00:10" 或 "10" 或 "0.5" */
@@ -312,7 +343,8 @@ export function buildExtract(o: ExtractOpts): string {
       if (o.videoCodec === "copy") {
         parts.push("-c:v copy");
       } else {
-        parts.push(`-c:v libx264 -crf ${o.videoCrf || 23}`);
+        const crf = Number(o.videoCrf) || 23;
+        parts.push(videoEnc({ hwaccel: o.hwaccel, crf }, "libx264"));
       }
       parts.push(outArg(`${out}.${o.videoFmt || "mp4"}`));
       body = parts.join(" ");
@@ -344,8 +376,9 @@ export function buildExtract(o: ExtractOpts): string {
   return ffmpegCmd(body);
 }
 
-export interface WatermarkOpts {
-  tab: "image" | "text" | "sub";
+/** 每个 tab 都要重编码视频（改画面必然要重新压缩），所以编码参数对整页生效 */
+export interface WatermarkOpts extends VideoEncOpts {
+  tab: "image" | "text" | "sub" | "delogo";
   input: string;
   /** 水印图片路径（tab=image 时用） */
   image?: string;
@@ -435,7 +468,7 @@ export function buildWatermark(o: WatermarkOpts): string {
     // 水印按源宽度比例缩放；aa 是 alpha 系数
     const filter = `[1:v]scale=iw*${scalePct}/100:ih*${scalePct}/100,colorchannelmixer=aa=${a}[w];[0:v][w]overlay=${p}:shortest=1[v]`;
     return ffmpegCmd(
-      `-i ${q(o.input)} -i ${q(o.image)} -filter_complex "${filter}" -map "[v]" -map 0:a? -c:a copy ${out}`
+      `-i ${q(o.input)} -i ${q(o.image)} -filter_complex "${filter}" -map "[v]" -map 0:a? ${videoEnc(o, "libx264")} -c:a copy ${out}`
     );
   }
   if (o.tab === "text") {
@@ -461,7 +494,7 @@ export function buildWatermark(o: WatermarkOpts): string {
     }
     const filter = `drawtext=${parts.join(":")}`;
     return ffmpegCmd(
-      `-i ${q(o.input)} -vf "${filter}" -map 0:v -map 0:a? -c:a copy ${out}`
+      `-i ${q(o.input)} -vf "${filter}" -map 0:v -map 0:a? ${videoEnc(o, "libx264")} -c:a copy ${out}`
     );
   }
   // 硬字幕：直接烧进画面；需要 libass 编译（ffmpeg 官方二进制都有）
@@ -473,7 +506,7 @@ export function buildWatermark(o: WatermarkOpts): string {
   // 报 `Unable to parse option value "..." as image size`。
   const sizeFilter = o.subFontsize && o.subFontsize > 0 ? `:force_style=Fontsize=${o.subFontsize}` : "";
   return ffmpegCmd(
-    `-i ${q(o.input)} -vf "subtitles=${filterPath(o.sub)}${sizeFilter}" -map 0:v -map 0:a? -c:a copy ${out}`
+    `-i ${q(o.input)} -vf "subtitles=${filterPath(o.sub)}${sizeFilter}" -map 0:v -map 0:a? ${videoEnc(o, "libx264")} -c:a copy ${out}`
   );
 }
 
@@ -481,13 +514,11 @@ export function buildWatermark(o: WatermarkOpts): string {
  * 滤镜调色页的状态：每个滤镜一个开关 + 一组可调参数。
  * 参数全部用 number/string 显式持有，UI 调多少就提交多少，不再硬编码默认值。
  */
-export interface FiltersOpts {
+export interface FiltersOpts extends VideoEncOpts {
   input: string;
   fmt: string;
-  /** 视频编码器；有视频滤镜时必然重编码 */
+  /** 软件视频编码器；有视频滤镜时必然重编码 */
   vEnc: string;
-  /** 视频 CRF */
-  crf: number;
   /** 音频动作：copy = 原样拷贝；loudnorm = 响度归一；mute = 去声 */
   audioMode: "copy" | "loudnorm" | "mute";
   /** 归一化目标响度（LUFS），audioMode=loudnorm 时用 */
@@ -611,7 +642,7 @@ export function buildFilters(o: FiltersOpts): string {
   // 有视频滤镜才重编码；否则 copy 更省事且不丢质量
   if (vf.length) {
     parts.push(`-vf "${vf.join(",")}"`);
-    parts.push(`-c:v ${o.vEnc} -crf ${o.crf}`);
+    parts.push(videoEnc(o, o.vEnc));
   } else {
     parts.push("-c:v copy");
   }
@@ -654,6 +685,8 @@ export interface StreamOpts {
   mode: StreamMode;
   /** 推流时决定输出封装；拉流时决定读取方式与输出 */
   proto: StreamProto;
+  /** 硬件加速编码器；推流 / 拉流转码时生效（码率控制模式） */
+  hwaccel: string;
   url: string;
   /** 视频码率，如 "4000k" */
   vbr: string;
@@ -710,7 +743,7 @@ function buildPush(o: StreamOpts): string {
 
   // 视频：H.264 + yuv420p（RTMP/HLS 服务器与播放器普遍只认 4:2:0；
   // 不给 -pix_fmt 时 x264 会按源选 yuv444p，多数服务器直接拒收/播放器打不开）
-  parts.push(`-c:v libx264 -preset ${o.preset} -b:v ${o.vbr} -pix_fmt yuv420p`);
+  parts.push(`${videoEncBitrate(o, o.vbr)} -pix_fmt yuv420p`);
   if (o.fps) parts.push(`-r ${o.fps}`);
   if (vf.length) parts.push(`-vf "${vf.join(",")}"`);
 
@@ -753,7 +786,7 @@ function buildPull(o: StreamOpts): string {
   parts.push(`-i ${q(o.url)}`);
   if (o.transcode) {
     parts.push(
-      `-c:v libx264 -preset ${o.preset} -b:v ${o.vbr} -pix_fmt yuv420p -c:a aac -b:a ${o.abr}`
+      `${videoEncBitrate(o, o.vbr)} -pix_fmt yuv420p -c:a aac -b:a ${o.abr}`
     );
   } else {
     // 直接拷贝：最省资源，输出容器需兼容源编码（RTMP/RTSP/HLS 多为 H.264/AAC）
@@ -792,6 +825,8 @@ export interface BatchOpts {
   vcodec: string;
   /** 音频编码：aac / mp3 / copy */
   acodec: string;
+  /** 硬件加速编码器；convert / compress 两个操作生效，空 = 软件编码 */
+  hwaccel: string;
   // ===== compress 专用 =====
   /** x265 CRF（18 高画质 … 35 高压缩） */
   crf: number;
@@ -847,7 +882,8 @@ export function buildBatch(o: BatchOpts): BatchItem[] {
         if (o.vcodec === "copy" && o.acodec === "copy") {
           body = `-i ${q(f)} -c copy`;
         } else {
-          const vc = o.vcodec === "copy" ? "copy" : o.vcodec;
+          // 硬件编码器只替换编码器名（批量转换没有 CRF 参数，交给编码器默认质量）
+          const vc = o.vcodec === "copy" ? "copy" : o.hwaccel || o.vcodec;
           const ac = o.acodec === "copy" ? "copy" : o.acodec;
           body = `-i ${q(f)} -c:v ${vc} -c:a ${ac}`;
         }
@@ -855,7 +891,7 @@ export function buildBatch(o: BatchOpts): BatchItem[] {
       }
       case "compress": {
         ext = o.fmt;
-        body = `-i ${q(f)} -c:v libx265 -crf ${o.crf} -preset ${o.preset} -c:a aac -b:a 128k`;
+        body = `-i ${q(f)} ${videoEnc({ hwaccel: o.hwaccel, crf: o.crf, preset: o.preset }, "libx265")} -c:a aac -b:a 128k`;
         break;
       }
       case "extract": {

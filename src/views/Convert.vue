@@ -8,11 +8,11 @@ import {
   supportsFaststart,
   AUDIO_ONLY_FMT,
   FMT_OPTIONS,
-  HWACCEL_ENCODERS,
 } from "../lib/ffmpeg";
 import { baseName } from "../lib/format";
 import CommandCard from "../components/CommandCard.vue";
 import SegGroup from "../components/SegGroup.vue";
+import HwAccelSelect from "../components/HwAccelSelect.vue";
 
 const s = reactive({
   enc: "libx264",
@@ -152,21 +152,12 @@ const hwaccelUsable = computed(() => !audioOnly.value && !videoOnly.value && s.e
         </div>
       </div>
 
-      <div>
-        <label class="text-xs text-muted">硬件加速编码（可选，需对应显卡驱动）</label>
-        <select
-          v-model="s.hwaccel"
-          :disabled="!hwaccelUsable"
-          class="w-full mt-1 bg-ink border border-panel2 rounded-lg px-3 py-2 text-sm focus:border-brand outline-none"
-          :class="hwaccelUsable ? '' : 'opacity-50 cursor-not-allowed'"
-        >
-          <option v-for="e in HWACCEL_ENCODERS" :key="e.value" :value="e.value">{{ e.label }}</option>
-        </select>
-        <p v-if="!hwaccelUsable" class="mt-1 text-xs text-muted">纯音频 / GIF / 直接拷贝时无需硬件加速</p>
-        <p v-else-if="s.hwaccel" class="mt-1 text-xs text-muted">
-          已选用 {{ HWACCEL_ENCODERS.find((e) => e.value === s.hwaccel)?.label }}，质量参数按 CRF 映射到 -cq / -global_quality。
-        </p>
-      </div>
+      <HwAccelSelect
+        v-model="s.hwaccel"
+        :disabled="!hwaccelUsable"
+        off-hint="纯音频 / GIF / 直接拷贝时无需硬件加速"
+        quality-hint="质量档位（CRF）会映射到 -cq / -global_quality"
+      />
 
       <div>
         <div class="flex items-center gap-2">
