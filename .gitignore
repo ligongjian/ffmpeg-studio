@@ -4,3 +4,7 @@ src-tauri/target
 src-tauri/gen
 *.log
 .DS_Store
+# 会话与记忆数据（非源码）
+.workbuddy/
+# 调试 ffmpeg 参数用的临时 json
+test_args.json
