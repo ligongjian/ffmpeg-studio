@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark" data-page-node-id="6usQsq7SUjZSMuiCuERHTY">
+<head data-page-node-id="RTFiRirAH34utILB2Eccsy">
+<meta charset="UTF-8" data-page-node-id="YDeHkNOxyRPMCplSJ5sQPA" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="Qnpkj2Ibx0nGgYwxHIXKJI" />
+<title>FFmpeg Studio · DESIGN.md Preview (Dark)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" data-page-node-id="BaMA5F5wPn2rHOIYEMy6yH" />
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" data-page-node-id="rj9lNtmMpPI4Quct04f5wD" />
+<style>
+  :root{
+    --bg:#0F172A; --panel:#1E293B; --line:#334155; --text:#EDF2FC; --muted:#9CAABE;
+    --brand:#8B5CF6; --brand-fg:#A78BFA; --brand-h:#7C3AED; --on-brand:#FFFFFF;
+    --ok:#34D399; --warn:#FBBF24; --err:#F87171;
+    --card-shadow:0 1px 3px rgb(0 0 0 / .35);
+    --glow:0 0 0 1px rgb(139 92 246 / .25), 0 8px 30px -8px rgb(139 92 246 / .35);
+    --sans:"Plus Jakarta Sans",sans-serif; --mono:"JetBrains Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:40px 24px;line-height:1.5}
+  .wrap{max-width:1080px;margin:0 auto}
+  header{display:flex;align-items:center;justify-content:space-between;margin-bottom:32px}
+  .logo{display:flex;align-items:center;gap:12px}
+  .logo .tile{width:40px;height:40px;border-radius:12px;background:rgb(var(--brand)/.15);display:flex;align-items:center;justify-content:center;color:var(--brand)}
+  h1{font-size:22px;font-weight:800;margin:0}
+  .sub{font-size:11px;color:var(--muted);font-weight:600}
+  .tag{font-size:12px;color:var(--muted);background:var(--panel);border:1px solid var(--line);padding:6px 12px;border-radius:999px}
+  h2{font-size:16px;font-weight:700;margin:36px 0 14px}
+  .grid{display:grid;gap:14px}
+  .cols-3{grid-template-columns:repeat(3,1fr)}
+  .cols-4{grid-template-columns:repeat(4,1fr)}
+  @media(max-width:760px){.cols-3,.cols-4{grid-template-columns:repeat(2,1fr)}}
+  .swatch{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:var(--card-shadow)}
+  .chip{height:54px;border-radius:12px;margin-bottom:10px}
+  .swatch .name{font-weight:700;font-size:14px}
+  .swatch .hex{font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .swatch .role{font-size:12px;color:var(--muted);margin-top:3px}
+  .type{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:var(--card-shadow)}
+  .type .label{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+  .type .sample{margin-top:6px}
+  .t-display{font-size:24px;font-weight:800}
+  .t-h1{font-size:20px;font-weight:700}
+  .t-h2{font-size:16px;font-weight:700}
+  .t-body{font-size:14px;font-weight:400}
+  .t-small{font-size:12px;color:var(--muted)}
+  .t-label{font-size:11px;font-weight:600}
+  .t-code{font-family:var(--mono);font-size:12.5px;line-height:1.7}
+  .comp{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px;box-shadow:var(--card-shadow);display:flex;flex-direction:column;gap:14px}
+  .comp h3{font-size:12px;color:var(--muted);font-weight:700;margin:0 0 -4px;text-transform:uppercase;letter-spacing:.04em}
+  .btn-primary{width:100%;padding:12px;border:none;border-radius:8px;background:var(--brand);color:var(--on-brand);font-weight:700;font-size:14px;font-family:var(--sans);cursor:pointer;transition:background .15s}
+  .btn-primary:hover{background:var(--brand-h)}
+  .btn-secondary{flex:1;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--line);color:var(--text);font-weight:600;font-size:14px;font-family:var(--sans);cursor:pointer;transition:background .15s}
+  .btn-secondary:hover{background:rgb(var(--brand)/.2)}
+  .row{display:flex;gap:10px}
+  .input{width:100%;margin-top:4px;background:rgb(var(--bg)/.5);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:14px;font-family:var(--sans);color:var(--text)}
+  .input:focus{outline:none;border-color:var(--brand)}
+  .input.mono{font-family:var(--mono);font-size:12.5px}
+  .dropzone{border:2px dashed var(--line);background:rgb(var(--bg)/.4);border-radius:12px;padding:26px;text-align:center;color:var(--muted);font-size:14px;transition:all .15s;cursor:pointer}
+  .dropzone:hover{border-color:var(--brand);background:rgb(var(--brand)/.05);box-shadow:var(--glow)}
+  .badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 6px;border-radius:999px;background:var(--brand);color:#fff;font-size:11px;font-weight:600}
+  .navitem{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;color:var(--muted);font-size:14px;cursor:pointer}
+  .navitem:hover{background:rgb(var(--line)/.5)}
+  .navitem.active{color:var(--brand-fg);background:linear-gradient(90deg,rgb(var(--brand)/.22),rgb(var(--brand)/.10));box-shadow:inset 3px 0 0 0 var(--brand)}
+  .dot{width:8px;height:8px;border-radius:999px;display:inline-block}
+  .toast{display:flex;align-items:center;gap:8px;max-width:280px;background:var(--panel);border:1px solid var(--line);box-shadow:0 10px 15px -3px rgb(0 0 0/.3),0 4px 6px -4px rgb(0 0 0/.3);border-radius:12px;padding:12px 16px;font-size:14px}
+  .ok{background:var(--ok)} .warn{background:var(--warn)} .err{background:var(--err)} .brand{background:var(--brand)}
+  .topbar{display:flex;align-items:center;justify-content:space-between;height:64px;padding:0 24px;border:1px solid var(--line);border-radius:12px;background:rgb(var(--panel)/.8);backdrop-filter:blur(6px)}
+  .topbar .ttl{font-weight:700;font-size:18px}
+  .topbar .tsub{font-size:11px;color:var(--muted)}
+  .iconbtn{position:relative;width:36px;height:36px;border-radius:8px;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--muted);cursor:pointer;transition:border-color .15s}
+  .iconbtn:hover{border-color:var(--brand)}
+  .notif{position:absolute;top:-6px;right:-6px;width:16px;height:16px;border-radius:999px;background:var(--brand);color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  .seg{display:flex;gap:4px}
+  .seg button{padding:4px 12px;border-radius:6px;border:1px solid var(--line);font-size:12px;background:transparent;color:var(--text);cursor:pointer;font-family:var(--sans)}
+  .seg button.active{background:var(--brand);color:#fff;font-weight:600;border-color:var(--brand)}
+  input[type=range].rng{width:100%;accent-color:var(--brand)}
+  .check{display:flex;align-items:center;gap:8px;font-size:14px}
+  input[type=checkbox].cb{width:16px;height:16px;accent-color:var(--brand)}
+  .prog{height:4px;border-radius:999px;background:var(--line);overflow:hidden;margin-top:6px}
+  .prog > i{display:block;height:100%;background:var(--brand);transition:width .3s}
+  .cmdc{background:rgb(var(--bg)/.7);border-radius:12px;padding:12px;font-family:var(--mono);font-size:12.5px;line-height:1.7;color:var(--brand-fg);white-space:pre-wrap;word-break:break-all}
+  .itbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+  .itbl th{text-align:left;font-size:11px;font-weight:600;color:var(--muted);padding:6px 10px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel)}
+  .itbl td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  .itbl td.k{color:var(--muted);white-space:nowrap;width:1%}
+  .itbl tbody tr:hover td{background:rgb(var(--brand)/.05)}
+  .ghostbtn{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1px solid var(--line);font-size:14px;background:transparent;color:var(--text);cursor:pointer;font-family:var(--sans);transition:all .15s}
+  .ghostbtn:hover{border-color:var(--brand);background:rgb(var(--brand)/.05)}
+  .inlinebtn{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--muted);background:transparent;border:none;padding:4px 6px;border-radius:6px;cursor:pointer;font-family:var(--sans)}
+  .inlinebtn:hover{color:var(--brand-fg);background:rgb(var(--brand)/.1)}
+  footer{margin-top:40px;font-size:12px;color:var(--muted);text-align:center}
+</style>
+</head>
+<body data-page-node-id="gOlv49pOlQT46T9B56z5id">
+<div class="wrap" data-page-node-id="BRe34duD7C7SkZD3alxDg5">
+  <header data-page-node-id="hdBGezNAh0usTSdO2bDtyz">
+    <div class="logo" data-page-node-id="qeHeU3OR6jogT4QnGeHPPk">
+      <div class="tile" data-page-node-id="dYfuMgJLff4f2VwDPHCVgy"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="EaTbsFcIa3fCkjzHA0uGZH"><path d="M5 3l14 9-14 9V3z" stroke-linecap="round" stroke-linejoin="round" data-page-node-id="e2NVHQyZOIf3zdzAtlTpZg"/></svg></div>
+      <div data-page-node-id="II470fQ1v3aNsDVBjdo2Al"><h1 data-page-node-id="OA3PSuGkFHO41mWtLDu8em">FFmpeg Studio</h1><div class="sub" data-page-node-id="jhlZODXiLccBAS3rckcx8O">DESIGN.md · 配色目录（暗色）</div></div>
+    </div>
+    <div class="tag" data-page-node-id="WDtJYpXnkaTuMDutGM6Ce6">Dark Theme</div>
+  </header>
+
+  <h2 data-page-node-id="vI2AQt3rSuwxO0aLz5AGRD">1 · 配色与角色</h2>
+  <div class="grid cols-4" data-page-node-id="FfsVCY0DiwmjfqqqmYfBIW">
+    <div class="swatch" data-page-node-id="08AdSodzxeGhfzq3izCkBI"><div class="chip" style="background:var(--brand)" data-page-node-id="bXvvJfahDQU9CXSumRTFjZ"></div><div class="name" data-page-node-id="hsdfzs3hoVo6wAP4ldKcRD">Brand Violet</div><div class="hex" data-page-node-id="lfXCcn8zPzWnYwfxebwukv">#8B5CF6</div><div class="role" data-page-node-id="FHhd6tOlNmjxvHVQTWexr1">主行动 / 强调</div></div>
+    <div class="swatch" data-page-node-id="awgU7VuUOB5BnTR41Qo4To"><div class="chip" style="background:var(--brand-fg)" data-page-node-id="spaaxjYWD0l0nMUiSgFoEt"></div><div class="name" data-page-node-id="xJGfRprFDBaPleKnpQmfdq">Violet Ink</div><div class="hex" data-page-node-id="jLWJw0ojgUg20HKFUmWocd">#A78BFA</div><div class="role" data-page-node-id="T0CBrum5gx5hrXNJsCsSYK">品牌文字 / 图标</div></div>
+    <div class="swatch" data-page-node-id="ifmBkQRCsvpKQjuc8vu9cp"><div class="chip" style="background:var(--brand-h)" data-page-node-id="whTjk16WhlCvV0Ioivmh3r"></div><div class="name" data-page-node-id="i76eCqUy9a30bWUXX0XyPw">Deep Violet</div><div class="hex" data-page-node-id="V5bXgNXnuAKPb2UmPxqqmD">#7C3AED</div><div class="role" data-page-node-id="laVduJxtjXctlms7iPvos0">hover / active</div></div>
+    <div class="swatch" data-page-node-id="B5njkD2TFPXausw3B5w5X4"><div class="chip" style="background:var(--on-brand)" data-page-node-id="Fj7d4A6fT1SwXZzmFHQey1"></div><div class="name" data-page-node-id="6eGHWIDFPrCWXXVq3Ge4VX">On Brand</div><div class="hex" data-page-node-id="AFqpViSNsblQeUoHE7xRzf">#FFFFFF</div><div class="role" data-page-node-id="mYxAowsuwwFLXyBb9sqGfZ">品牌填充前景</div></div>
+  </div>
+  <div class="grid cols-4" style="margin-top:14px" data-page-node-id="1MMwFpOOIDk1JquurcO9eA">
+    <div class="swatch" data-page-node-id="FZrGDO7Uw3WKVFmlCiMlG0"><div class="chip" style="background:var(--bg)" data-page-node-id="Df7dGaG3HA6rVxHFiwjWWZ"></div><div class="name" data-page-node-id="vd2FWAMYvXrxKrf1Q1zJLM">Canvas</div><div class="hex" data-page-node-id="EZacUC2XFImqPwDYQcF5Er">#0F172A</div><div class="role" data-page-node-id="ajTcvzflM4ZCOHfEklZT2A">页面底色</div></div>
+    <div class="swatch" data-page-node-id="W2t5rU5MVBwOZYGVJI1rls"><div class="chip" style="background:var(--panel)" data-page-node-id="yhXFb8xAKX49VEB0zQDA5O"></div><div class="name" data-page-node-id="TUMkTvmwWkYjBC62244hvt">Panel</div><div class="hex" data-page-node-id="2EMns5gWVxl80h5WEDpMIT">#1E293B</div><div class="role" data-page-node-id="ChS9UcWUAUhtFX3Fxsy1m5">卡片 / 侧栏</div></div>
+    <div class="swatch" data-page-node-id="LEFSpbqSvwXhAh9WEzSbSM"><div class="chip" style="background:var(--line)" data-page-node-id="QNNIjHmDlk09RZAQUPUGmg"></div><div class="name" data-page-node-id="NNELec3HIU7k92nQPvkzgB">Line / Chip</div><div class="hex" data-page-node-id="IQ3dNijV5iLeHMb6PDyUKk">#334155</div><div class="role" data-page-node-id="kxRT03H4SXjsrqGnPck7UY">边框 / 次级面</div></div>
+    <div class="swatch" data-page-node-id="0R2hiQTitZuFwWrju7V616"><div class="chip" style="background:rgb(var(--text)/.06)" data-page-node-id="DG4D0UhIrZiAHCqBDwPglm"></div><div class="name" data-page-node-id="wzkxez1xpN7zhSix7mzE4w">Sunk</div><div class="hex" data-page-node-id="GoLBEFyFa72N2YD8dDNdLV">bg-ink/40</div><div class="role" data-page-node-id="D3glvNwlsb20zHP0jD1Ul4">凹陷输入框</div></div>
+  </div>
+  <div class="grid cols-4" style="margin-top:14px" data-page-node-id="yJIN0QCVrVUaozZnv9xVTL">
+    <div class="swatch" data-page-node-id="ECHEDLDsAFWFITsCTTVUkv"><div class="chip" style="background:var(--text)" data-page-node-id="JHKSCdFRs6Gg2Dyv0GjGbn"></div><div class="name" data-page-node-id="tzt5r5H5xSgJSFNVP5REZC">Primary Text</div><div class="hex" data-page-node-id="AWmCNwL4mXBxqJrJVRMvCg">#EDF2FC</div><div class="role" data-page-node-id="h5KVIMN7jNdBL1p3t4LCVG">正文 / 标题</div></div>
+    <div class="swatch" data-page-node-id="rcAhKMjJgaGqdn4qNZAywR"><div class="chip" style="background:var(--muted)" data-page-node-id="PyncZhFSkQu9ojErOdpBv1"></div><div class="name" data-page-node-id="Wn6qEfrNRqpLo7f4LWAOcX">Muted</div><div class="hex" data-page-node-id="dp1vgZytUrPRbMLfYhyden">#9CAABE</div><div class="role" data-page-node-id="8CaKIzslE19Hul7PsRvEnq">次要文字</div></div>
+    <div class="swatch" data-page-node-id="RBZO1ZV5Hm7QBegheMMe6k"><div class="chip" style="background:var(--ok)" data-page-node-id="xLFkKbBEibOnaAcssCSf03"></div><div class="name" data-page-node-id="iINuAGbyPuWGH71pYXfWNv">OK (emerald-400)</div><div class="hex" data-page-node-id="qU9yG0PetzCAsgyfYFwf7x">#34D399</div><div class="role" data-page-node-id="YBHHkHW48e2BSkVjq6PCwP">成功</div></div>
+    <div class="swatch" data-page-node-id="0W1gYYs9kbMDmORooxMAdF"><div class="chip" style="background:var(--err)" data-page-node-id="12KU4RsC6XyArOP2S4FlAn"></div><div class="name" data-page-node-id="i6xwxFfZdtGDiPvxqIOeUv">Error (red-400)</div><div class="hex" data-page-node-id="ySRHhNGxnw8qSNOXX7ZpQC">#F87171</div><div class="role" data-page-node-id="fCbtlm7lGE6trSSnQ2vJcp">失败</div></div>
+  </div>
+
+  <h2 data-page-node-id="OcAIXB0jBGr643IZy5Aacu">2 · 字体层级</h2>
+  <div class="grid cols-3" data-page-node-id="zGHt0Eg8kh3me9jHur7jKh">
+    <div class="type" data-page-node-id="TUWBI8tQ0iLXaEfoFj9EEa"><div class="label" data-page-node-id="MvWsvrfjxb1dV7fayvCt5O">Display</div><div class="sample t-display" data-page-node-id="3dgxj4iF4EiCczQGYQ3cgx">24 / 800</div></div>
+    <div class="type" data-page-node-id="4ixq2gMTSDLQrLIb7Un5Ta"><div class="label" data-page-node-id="m08gstsUWsIDSzW8JLanv2">H1 Page title</div><div class="sample t-h1" data-page-node-id="Md8THm1forovLqoHGMmTAl">20 / 700</div></div>
+    <div class="type" data-page-node-id="F0Z1L78KRQuwDP5EmywCyJ"><div class="label" data-page-node-id="jEmiZu281sz4huADmpOHuU">H2 Card title</div><div class="sample t-h2" data-page-node-id="Cturxu6vywIi10uHjATQpa">16 / 700</div></div>
+    <div class="type" data-page-node-id="SWttGs9jaYHhZ9zFQDjs6T"><div class="label" data-page-node-id="VeUcCuFicGK7pFoEmYqfCA">Body</div><div class="sample t-body" data-page-node-id="M4UPSkDHHXkt9GRe9KguV0">14 / 400 — 默认阅读尺寸</div></div>
+    <div class="type" data-page-node-id="qSPHHD6fut8uCbc8czL7hE"><div class="label" data-page-node-id="HVGhcSd3tD1AfCoSOEUX6B">Small</div><div class="sample t-small" data-page-node-id="qPcSs171MJfC4zDk1PykXp">12 / 400 — 表格与提示</div></div>
+    <div class="type" data-page-node-id="nnukG9V8GttFHlaFLMyMeF"><div class="label" data-page-node-id="A89zbYVQoGBdAu71rWQiG7">Label</div><div class="sample t-label" data-page-node-id="XPmKXSV6CGii1cfrlwECSZ">11 / 600 — 表头与微标注</div></div>
+  </div>
+  <div class="grid cols-3" style="margin-top:14px" data-page-node-id="0QvAemJnXVQwnbtOvPNvfx">
+    <div class="type" data-page-node-id="DZRcV8rGULP7b3pQQzlEo3"><div class="label" data-page-node-id="RqVodREQ0IGhJpHd1FeVU8">Command (mono)</div><div class="sample t-code" data-page-node-id="0zY1QkXHFSBvqeoxK2BfxZ">ffmpeg -i in.mp4 -c:v libx264 -crf 23 out.mkv</div></div>
+    <div class="type" data-page-node-id="7DqouHpGotFgQZP27AdXlI"><div class="label" data-page-node-id="tr2DL2bgU7sAcCgyMigKSb">Path (mono)</div><div class="sample t-code" data-page-node-id="fjtKLVjrVPvwP7nESaBlOf">C:/Users/me/Videos/clip.mov</div></div>
+    <div class="type" data-page-node-id="G4pcLr9BCAegPrUYuM4gDb"><div class="label" data-page-node-id="0CiruqjsxQoKGZtNy8pR3K">Fonts</div><div class="sample t-small" data-page-node-id="NuL6mF3i0uVHKHdyhqZF6c">Plus Jakarta Sans (300–800)<br data-page-node-id="q4Y7WNXWGIQkwOWZPhMGZ9"/>JetBrains Mono (400/500)</div></div>
+  </div>
+
+  <h2 data-page-node-id="vIh8J6FlUKXdLRhYjw2gIR">3 · 核心组件</h2>
+  <div class="grid cols-3" data-page-node-id="7NYcWCj2fzaUYPiLrXbL5D">
+    <div class="comp" data-page-node-id="EIaiCDfdRqHCKKBeOPuwP5">
+      <h3 data-page-node-id="7WECrk5IsTj8S0luYoIIR4">Buttons</h3>
+      <button class="btn-primary" data-page-node-id="HhQuRFEFgodwCTUJ6Gufo2">主按钮 Primary</button>
+      <div class="row" data-page-node-id="DN2udbRvR4LApUotfVCDm4"><button class="btn-secondary" data-page-node-id="3HP0Rp2WUfgGfbHWtzwWS8">次按钮</button><button class="btn-secondary" style="background:rgb(var(--line)/.6);color:var(--muted)" data-page-node-id="fZii8q9jzGxSvju7U6s4Dz">禁用</button></div>
+      <button class="ghostbtn" data-page-node-id="SqpseJbvKLQBKCvGX5VK55">幽灵按钮 Ghost</button>
+      <button class="inlinebtn" data-page-node-id="maYXZygwd7iKgBhMPVMXXQ">✎ 行内操作</button>
+      <label style="font-size:12px;color:var(--muted);font-weight:600" data-page-node-id="FwnzbqRXuwEXY8M4zjGFwU">输出格式</label>
+      <input class="input" value="mp4" data-page-node-id="HdSUpNRB0cqqaFcHZ5hqeu" />
+      <label style="font-size:12px;color:var(--muted);font-weight:600" data-page-node-id="KKQivYwFx7DaREnphat1ZA">输出路径</label>
+      <input class="input mono" value="C:/out/clip.mkv" data-page-node-id="pEYuuyhdLMLgaFQidPSVN8" />
+    </div>
+    <div class="comp" data-page-node-id="pLQuqJD7cWQVnJa3jnxJJ9">
+      <h3 data-page-node-id="XRdS03oLxnEQbKe5DSvP5U">Surfaces & Zones</h3>
+      <div class="dropzone" data-page-node-id="raFrQF6KXWb9c7kZW3Nmlg">拖放媒体文件到这里<br data-page-node-id="sIx9a959sqVfQwduBQ0fw6"/><span style="font-size:12px" data-page-node-id="70UQIAJMtG4yNtEHuz2NKg">点击选择，或将文件拖入</span></div>
+      <div style="font-size:12px;color:var(--muted);font-weight:600" data-page-node-id="TG4tDNQ5Gukesh3cJRCSZa">运行状态</div>
+      <div style="display:flex;gap:14px;align-items:center" data-page-node-id="gGInQ73DzhsdHgjKo0eXCc">
+        <span data-page-node-id="HxshbqVDJgb0OHmw3Fieot"><span class="dot ok" data-page-node-id="QStjjyqlVNkBwwMkWvIcSz"></span> 成功</span>
+        <span data-page-node-id="VHeEeIojNr9AUABPIq5enx"><span class="dot brand" data-page-node-id="fBi5INHhogd5upHjhmMKZf"></span> 队列</span>
+        <span data-page-node-id="605LM4EnvQFYpMRgtHDWO1"><span class="dot err" data-page-node-id="Qa5uRpHuQrB2J0gFp0ob0u"></span> 失败</span>
+      </div>
+      <div data-page-node-id="GRrgBjrB69GytD9wUbSTAY">徽标 <span class="badge" data-page-node-id="ZczqjyUmb7KGEBRr8iFIUv">3</span></div>
+    </div>
+    <div class="comp" data-page-node-id="IaLms0eEQiqYGqNZ3VEu0C">
+      <h3 data-page-node-id="2Abku91NP0BMI6VVPBQaBi">Nav & Toast</h3>
+      <div class="navitem active" data-page-node-id="lVpEF7NkDvdZp4xNU28WeT">▦ 格式转换</div>
+      <div class="navitem" data-page-node-id="RWzOr8pAdUkTLN6BMjtnnb">▦ 压缩优化</div>
+      <div class="navitem" data-page-node-id="q0LMwTDuwOx7r3VuCHmDnI">▦ 剪辑分割</div>
+      <div class="toast" data-page-node-id="LbHfDWYEZzsN8TyddhgPlL"><span class="dot ok" data-page-node-id="yzcJKJ09ziu7FYa9MT7jOy"></span> 已加入任务队列</div>
+    </div>
+  </div>
+
+  <h2 data-page-node-id="ICOpWmwX2BMOAY8GFxTjUl">4 · 扩展组件</h2>
+  <div class="grid cols-3" data-page-node-id="6Pq0bq0mdx1B5flTQXONaw">
+    <div class="comp" data-page-node-id="BeAjQHGX9sGvHgjUTIqoYV">
+      <h3 data-page-node-id="7HDORjYt2gOqd5PmkUCMxt">Topbar & Icon buttons</h3>
+      <div class="topbar" data-page-node-id="qG0ABidxhcC9LonGGqWIQf">
+        <div data-page-node-id="yJN30aOfG3g3xbyxiYCfAw"><div class="ttl" data-page-node-id="VUHeHsHpOmFqqEDVI0o1Ze">格式转换</div><div class="tsub" data-page-node-id="b0GEH95sEwrkBLYnBPA78l">容器互转与编解码</div></div>
+        <div style="display:flex;gap:8px" data-page-node-id="WhNtkWYSTpoPkqX67Qti9Q">
+          <div class="iconbtn" data-page-node-id="bpEwrp4XaatDjdue7dBnMX">☾</div>
+          <div class="iconbtn" data-page-node-id="AeORJVfwBe0S9MY7drD8Ay">≡<span class="notif" data-page-node-id="A7p7Qq1yXVLSHqnA74kEbe">5</span></div>
+        </div>
+      </div>
+      <div class="row" data-page-node-id="HVuZLYBtzfJsi2nR0zm8VZ">
+        <div class="iconbtn" style="flex:1" data-page-node-id="nXwx0axW91T9iC451X8xge">☾ 主题</div>
+        <div class="iconbtn" style="flex:1" data-page-node-id="MoZPlTaEOC9IzjEe2MvD8d">⚙ 设置</div>
+        <div class="iconbtn" style="flex:1" data-page-node-id="KUPze9BZP6ypYTsmHVpsyV">≡ 队列</div>
+      </div>
+    </div>
+    <div class="comp" data-page-node-id="cWmXlHu5CP8xrKkC54WSm6">
+      <h3 data-page-node-id="HbSwTUDSor30BmiqJpdYmX">Segmented / Slider / Checkbox</h3>
+      <div class="seg" data-page-node-id="46BD8yp3HAC5ytLvgEl8kY"><button class="active" data-page-node-id="4PAj7E8E3skShdrHnKCFjO">CRF</button><button data-page-node-id="2K0ft4ICPi4dEUMeK7SDS2">码率</button><button data-page-node-id="tW9Rqdz5fXMrn4awdgk8xt">预设</button></div>
+      <label class="check" data-page-node-id="oJ80nD0g6sQe8KSTzsX2vq"><input type="checkbox" class="cb" checked data-page-node-id="iM1asZkDYpZ0ILUoN2JDor" /> 标准化响度</label>
+      <label class="check" data-page-node-id="kR9ybtch3xuDUk8JXq3XMZ"><input type="checkbox" class="cb" data-page-node-id="xblzdGYB8Jao0GErad12ro" /> 快速启动</label>
+      <label style="font-size:12px;color:var(--muted);font-weight:600" data-page-node-id="p7lgep273Ms8ZimUeYtaRR">质量 — CRF 23</label>
+      <input type="range" min="18" max="35" value="23" class="rng" data-page-node-id="ADc7UIOAugX4v9OWoE7fG3" />
+    </div>
+    <div class="comp" data-page-node-id="MbtpRCb8vZchEFiPEOCaTy">
+      <h3 data-page-node-id="LCB1fmZ0SI3qXahilwiXmo">Progress bar</h3>
+      <div style="font-size:13px" data-page-node-id="DgX89LHKZ2HAiW0oBGYaeS">运行中 · 进度 64%</div>
+      <div class="prog" data-page-node-id="yWsATIXNxqDNGV54iShHsB"><i style="width:64%" data-page-node-id="YuY6J4TQCuT83wvK6hN3Sg"></i></div>
+      <div style="font-size:13px;margin-top:6px" data-page-node-id="mmEyD0pZwBq5YTg4YpFinz">不确定进度</div>
+      <div class="prog" data-page-node-id="pc9EwqyWRkvssjUeyGyeru"><i class="animate-pulse" style="width:100%" data-page-node-id="gnJAtWil8Uq5QxYjGrJ7fZ"></i></div>
+      <div style="font-size:13px;margin-top:6px" data-page-node-id="tucAmwAGBf2TcJMhppiz5I">完成</div>
+      <div class="prog" data-page-node-id="lwJG5ZyBesKpNzmttPu5pK"><i class="ok" style="width:100%" data-page-node-id="D54tsec2fY8g6miYNPs25w"></i></div>
+    </div>
+  </div>
+
+  <div class="grid cols-3" style="margin-top:14px" data-page-node-id="20X02Pl1INEAboiWZmXoXS">
+    <div class="comp" data-page-node-id="o2m7HaxD9NaTLvXVPUxDA8">
+      <h3 data-page-node-id="tCP0ywTO7zSWgUfA3KnWDX">Command card</h3>
+      <div style="display:flex;justify-content:space-between;align-items:center" data-page-node-id="qmDo3QSyVrNBWYxQSZTaYl">
+        <div style="font-weight:600;font-size:14px" data-page-node-id="TtW7awI3t7pCnWBHzTNquK">转码命令</div>
+        <button class="inlinebtn" data-page-node-id="XvTgdcbTqVohl6scScJvyB">复制</button>
+      </div>
+      <div class="cmdc" data-page-node-id="1ye1CstznDc9GvDAnHOxKQ">ffmpeg -i input.mov -c:v libx264 -crf 23 -c:a aac out.mp4</div>
+      <button class="btn-primary" style="padding:10px" data-page-node-id="Lp1Sv4p2y2O7mx1uNr914l">加入队列并运行</button>
+    </div>
+    <div class="comp" data-page-node-id="tbMTBD2RyUC07RqXDiGNsC">
+      <h3 data-page-node-id="mA30yEzpld2gEGimE7F6S4">Info table</h3>
+      <table class="itbl" data-page-node-id="Qq0g6ck8WJtRt1VDylUd66">
+        <thead data-page-node-id="BeaxY9bLtJfHxvrrJfqONB"><tr data-page-node-id="yCFlh5iszprYAodtPS9pma"><th data-page-node-id="AD5gErvaAvfdpeBfkyhzpa">属性</th><th data-page-node-id="mBT01AmHEHFG2bm6GIF5h9">值</th></tr></thead>
+        <tbody data-page-node-id="W8QquhC89yBRjkJlLy4Cvb">
+          <tr data-page-node-id="M07ciEVIXzW1fsCnkao0BR"><td class="k" data-page-node-id="bbATOKnASBhTNCCMshzLMM">时长</td><td data-page-node-id="OMnweQqZhcE19BBT2CxUB1">00:02:14</td></tr>
+          <tr data-page-node-id="CLQUnGJcV4kHMarRpgqsNa"><td class="k" data-page-node-id="JaEsKny9KT4ZcGWMPGqCGC">分辨率</td><td data-page-node-id="VH4rts1IoR7xWHItMSvxnB">1920×1080</td></tr>
+          <tr data-page-node-id="RYxwpEFw2F9WzMkbsMSl7Y"><td class="k" data-page-node-id="Znu31v6Ubkz2fbE4cviz3S">编码</td><td data-page-node-id="H8LlZ76f9Mg6D1EZG4aoEQ">H.264 / AAC</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="comp" data-page-node-id="vgOYHexMCoPKCoRAXEuX0V">
+      <h3 data-page-node-id="v7X0FTiVOHtUTFHlbBMDue">Status mapping</h3>
+      <div style="display:flex;flex-direction:column;gap:8px;font-size:13px" data-page-node-id="aW6zOYnJmGPnKgL51TcqbV">
+        <span data-page-node-id="xXxf7rq9wLGWJphvDhfhdk"><span class="dot brand" data-page-node-id="XbSSRA6Md0Q3uU1ywu5YeS"></span> 进行中 running</span>
+        <span data-page-node-id="ZJX8YPCqCEKsIQwn3kCeac"><span class="dot ok" data-page-node-id="yPTgXbogmfjtoRJmqITtdc"></span> 完成 done</span>
+        <span data-page-node-id="Ha7MwSdhw9EqpxjG1WMBCf"><span class="dot err" data-page-node-id="Ea43k2cH7g072gwuQpvkGN"></span> 失败 / 取消 failed</span>
+        <span data-page-node-id="N9saTeYFxRoYPaJZZQip85"><span class="dot" style="background:var(--muted)" data-page-node-id="ac0RuKlD5evyYXOiu6kfe5"></span> 队列 queued</span>
+        <span data-page-node-id="XxUM9JsVPme9V6IBDe6Scs"><span class="dot ok" data-page-node-id="EH0mzTvpFArw8IBB1RnLB6"></span> 引擎就绪</span>
+        <span data-page-node-id="KgXjW2Iblwz920L93oQ0vD"><span class="dot err" data-page-node-id="b7qDKd4eOajegbQVyWio80"></span> 引擎不可用</span>
+      </div>
+    </div>
+  </div>
+
+  <footer data-page-node-id="n5syFyowNxx36f3SGbV66D">由 design-md-generator 从 ffmpeg-studio 源码反向提取 · 所有色值取自 src/style.css 与 tailwind.config.js</footer>
+</div>
+</body>
+</html>

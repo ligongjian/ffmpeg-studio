@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FFmpeg Studio · DESIGN.md Preview (Light)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#F6F4FE; --panel:#FFFFFF; --line:#E0DAF2; --text:#1E1B33; --muted:#6B6584;
+    --brand:#7C3AED; --brand-fg:#7C3AED; --brand-h:#6D28D9; --on-brand:#FFFFFF;
+    --ok:#047857; --warn:#B45309; --err:#DC2626;
+    --card-shadow:0 1px 3px rgb(30 27 51 / .06);
+    --glow:0 0 0 1px rgb(124 58 237 / .25), 0 8px 30px -8px rgb(124 58 237 / .35);
+    --sans:"Plus Jakarta Sans",sans-serif; --mono:"JetBrains Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);padding:40px 24px;line-height:1.5}
+  .wrap{max-width:1080px;margin:0 auto}
+  header{display:flex;align-items:center;justify-content:space-between;margin-bottom:32px}
+  .logo{display:flex;align-items:center;gap:12px}
+  .logo .tile{width:40px;height:40px;border-radius:12px;background:rgb(var(--brand)/.15);display:flex;align-items:center;justify-content:center;color:var(--brand)}
+  h1{font-size:22px;font-weight:800;margin:0}
+  .sub{font-size:11px;color:var(--muted);font-weight:600}
+  .tag{font-size:12px;color:var(--muted);background:var(--panel);border:1px solid var(--line);padding:6px 12px;border-radius:999px}
+  h2{font-size:16px;font-weight:700;margin:36px 0 14px}
+  .grid{display:grid;gap:14px}
+  .cols-3{grid-template-columns:repeat(3,1fr)}
+  .cols-4{grid-template-columns:repeat(4,1fr)}
+  @media(max-width:760px){.cols-3,.cols-4{grid-template-columns:repeat(2,1fr)}}
+  .swatch{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:var(--card-shadow)}
+  .chip{height:54px;border-radius:12px;margin-bottom:10px}
+  .swatch .name{font-weight:700;font-size:14px}
+  .swatch .hex{font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .swatch .role{font-size:12px;color:var(--muted);margin-top:3px}
+  .type{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:var(--card-shadow)}
+  .type .label{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+  .type .sample{margin-top:6px}
+  .t-display{font-size:24px;font-weight:800}
+  .t-h1{font-size:20px;font-weight:700}
+  .t-h2{font-size:16px;font-weight:700}
+  .t-body{font-size:14px;font-weight:400}
+  .t-small{font-size:12px;color:var(--muted)}
+  .t-label{font-size:11px;font-weight:600}
+  .t-code{font-family:var(--mono);font-size:12.5px;line-height:1.7}
+  .comp{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px;box-shadow:var(--card-shadow);display:flex;flex-direction:column;gap:14px}
+  .comp h3{font-size:12px;color:var(--muted);font-weight:700;margin:0 0 -4px;text-transform:uppercase;letter-spacing:.04em}
+  .btn-primary{width:100%;padding:12px;border:none;border-radius:8px;background:var(--brand);color:var(--on-brand);font-weight:700;font-size:14px;font-family:var(--sans);cursor:pointer;transition:background .15s}
+  .btn-primary:hover{background:var(--brand-h)}
+  .btn-secondary{flex:1;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--line);color:var(--text);font-weight:600;font-size:14px;font-family:var(--sans);cursor:pointer;transition:background .15s}
+  .btn-secondary:hover{background:rgb(var(--brand)/.2)}
+  .row{display:flex;gap:10px}
+  .input{width:100%;margin-top:4px;background:rgb(var(--bg)/.5);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:14px;font-family:var(--sans);color:var(--text)}
+  .input:focus{outline:none;border-color:var(--brand)}
+  .input.mono{font-family:var(--mono);font-size:12.5px}
+  .dropzone{border:2px dashed var(--line);background:rgb(var(--bg)/.4);border-radius:12px;padding:26px;text-align:center;color:var(--muted);font-size:14px;transition:all .15s;cursor:pointer}
+  .dropzone:hover{border-color:var(--brand);background:rgb(var(--brand)/.05);box-shadow:var(--glow)}
+  .badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 6px;border-radius:999px;background:var(--brand);color:#fff;font-size:11px;font-weight:600}
+  .navitem{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;color:var(--muted);font-size:14px;cursor:pointer}
+  .navitem:hover{background:rgb(var(--line)/.5)}
+  .navitem.active{color:var(--brand-fg);background:linear-gradient(90deg,rgb(var(--brand)/.22),rgb(var(--brand)/.10));box-shadow:inset 3px 0 0 0 var(--brand)}
+  .dot{width:8px;height:8px;border-radius:999px;display:inline-block}
+  .toast{display:flex;align-items:center;gap:8px;max-width:280px;background:var(--panel);border:1px solid var(--line);box-shadow:0 10px 15px -3px rgb(0 0 0/.1),0 4px 6px -4px rgb(0 0 0/.1);border-radius:12px;padding:12px 16px;font-size:14px}
+  .ok{background:var(--ok)} .warn{background:var(--warn)} .err{background:var(--err)} .brand{background:var(--brand)}
+  /* new components */
+  .topbar{display:flex;align-items:center;justify-content:space-between;height:64px;padding:0 24px;border:1px solid var(--line);border-radius:12px;background:rgb(var(--panel)/.8);backdrop-filter:blur(6px)}
+  .topbar .ttl{font-weight:700;font-size:18px}
+  .topbar .tsub{font-size:11px;color:var(--muted)}
+  .iconbtn{position:relative;width:36px;height:36px;border-radius:8px;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--muted);cursor:pointer;transition:border-color .15s}
+  .iconbtn:hover{border-color:var(--brand)}
+  .notif{position:absolute;top:-6px;right:-6px;width:16px;height:16px;border-radius:999px;background:var(--brand);color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  .seg{display:flex;gap:4px}
+  .seg button{padding:4px 12px;border-radius:6px;border:1px solid var(--line);font-size:12px;background:transparent;color:var(--text);cursor:pointer;font-family:var(--sans)}
+  .seg button.active{background:var(--brand);color:#fff;font-weight:600;border-color:var(--brand)}
+  input[type=range].rng{width:100%;accent-color:var(--brand)}
+  .check{display:flex;align-items:center;gap:8px;font-size:14px}
+  input[type=checkbox].cb{width:16px;height:16px;accent-color:var(--brand)}
+  .prog{height:4px;border-radius:999px;background:var(--line);overflow:hidden;margin-top:6px}
+  .prog > i{display:block;height:100%;background:var(--brand);transition:width .3s}
+  .cmdc{background:rgb(var(--bg)/.7);border-radius:12px;padding:12px;font-family:var(--mono);font-size:12.5px;line-height:1.7;color:var(--brand);white-space:pre-wrap;word-break:break-all}
+  .itbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+  .itbl th{text-align:left;font-size:11px;font-weight:600;color:var(--muted);padding:6px 10px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel)}
+  .itbl td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  .itbl td.k{color:var(--muted);white-space:nowrap;width:1%}
+  .itbl tbody tr:hover td{background:rgb(var(--brand)/.05)}
+  .ghostbtn{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1px solid var(--line);font-size:14px;background:transparent;color:var(--text);cursor:pointer;font-family:var(--sans);transition:all .15s}
+  .ghostbtn:hover{border-color:var(--brand);background:rgb(var(--brand)/.05)}
+  .inlinebtn{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--muted);background:transparent;border:none;padding:4px 6px;border-radius:6px;cursor:pointer;font-family:var(--sans)}
+  .inlinebtn:hover{color:var(--brand);background:rgb(var(--brand)/.1)}
+  footer{margin-top:40px;font-size:12px;color:var(--muted);text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">
+      <div class="tile"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3l14 9-14 9V3z" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div><h1>FFmpeg Studio</h1><div class="sub">DESIGN.md · 配色目录（亮色）</div></div>
+    </div>
+    <div class="tag">Light Theme</div>
+  </header>
+
+  <h2>1 · 配色与角色</h2>
+  <div class="grid cols-4">
+    <div class="swatch"><div class="chip" style="background:var(--brand)"></div><div class="name">Brand Violet</div><div class="hex">#7C3AED</div><div class="role">主行动 / 强调</div></div>
+    <div class="swatch"><div class="chip" style="background:var(--brand-fg)"></div><div class="name">Violet Ink</div><div class="hex">#7C3AED</div><div class="role">品牌文字 / 图标</div></div>
+    <div class="swatch"><div class="chip" style="background:var(--brand-h)"></div><div class="name">Deep Violet</div><div class="hex">#6D28D9</div><div class="role">hover / active</div></div>
+    <div class="swatch"><div class="chip" style="background:var(--on-brand)"></div><div class="name">On Brand</div><div class="hex">#FFFFFF</div><div class="role">品牌填充前景</div></div>
+  </div>
+  <div class="grid cols-4" style="margin-top:14px">
+    <div class="swatch"><div class="chip" style="background:var(--bg)"></div><div class="name">Canvas</div><div class="hex">#F6F4FE</div><div class="role">页面底色</div></div>
+    <div class="swatch"><div class="chip" style="background:var(--panel)"></div><div class="name">Panel</div><div class="hex">#FFFFFF</div><div class="role">卡片 / 侧栏</div></div>
+    <div class="swatch"><div class="chip" style="background:var(--line)"></div><div class="name">Line / Chip</div><div class="hex">#E0DAF2</div><div class="role">边框 / 次级面</div></div>
+    <div class="swatch"><div class="chip" style="background:rgb(var(--text)/.06)"></div><div class="name">Sunk</div><div class="hex">bg-ink/40</div><div class="role">凹陷输入框</div></div>
+  </div>
+  <div class="grid cols-4" style="margin-top:14px">
+    <div class="swatch"><div class="chip" style="background:var(--text)"></div><div class="name">Primary Text</div><div class="hex">#1E1B33</div><div class="role">正文 / 标题</div></div>
+    <div class="swatch"><div class="chip" style="background:var(--muted)"></div><div class="name">Muted</div><div class="hex">#6B6584</div><div class="role">次要文字</div></div>
+    <div class="swatch"><div class="chip" style="background:var(--ok)"></div><div class="name">OK (emerald-700)</div><div class="hex">#047857</div><div class="role">成功</div></div>
+    <div class="swatch"><div class="chip" style="background:var(--err)"></div><div class="name">Error (red-600)</div><div class="hex">#DC2626</div><div class="role">失败</div></div>
+  </div>
+
+  <h2>2 · 字体层级</h2>
+  <div class="grid cols-3">
+    <div class="type"><div class="label">Display</div><div class="sample t-display">24 / 800</div></div>
+    <div class="type"><div class="label">H1 Page title</div><div class="sample t-h1">20 / 700</div></div>
+    <div class="type"><div class="label">H2 Card title</div><div class="sample t-h2">16 / 700</div></div>
+    <div class="type"><div class="label">Body</div><div class="sample t-body">14 / 400 — 默认阅读尺寸</div></div>
+    <div class="type"><div class="label">Small</div><div class="sample t-small">12 / 400 — 表格与提示</div></div>
+    <div class="type"><div class="label">Label</div><div class="sample t-label">11 / 600 — 表头与微标注</div></div>
+  </div>
+  <div class="grid cols-3" style="margin-top:14px">
+    <div class="type"><div class="label">Command (mono)</div><div class="sample t-code">ffmpeg -i in.mp4 -c:v libx264 -crf 23 out.mkv</div></div>
+    <div class="type"><div class="label">Path (mono)</div><div class="sample t-code">C:/Users/me/Videos/clip.mov</div></div>
+    <div class="type"><div class="label">Fonts</div><div class="sample t-small">Plus Jakarta Sans (300–800)<br/>JetBrains Mono (400/500)</div></div>
+  </div>
+
+  <h2>3 · 核心组件</h2>
+  <div class="grid cols-3">
+    <div class="comp">
+      <h3>Buttons</h3>
+      <button class="btn-primary">主按钮 Primary</button>
+      <div class="row"><button class="btn-secondary">次按钮</button><button class="btn-secondary" style="background:rgb(var(--line)/.6);color:var(--muted)">禁用</button></div>
+      <button class="ghostbtn">幽灵按钮 Ghost</button>
+      <button class="inlinebtn">✎ 行内操作</button>
+      <label style="font-size:12px;color:var(--muted);font-weight:600">输出格式</label>
+      <input class="input" value="mp4" />
+      <label style="font-size:12px;color:var(--muted);font-weight:600">输出路径</label>
+      <input class="input mono" value="C:/out/clip.mkv" />
+    </div>
+    <div class="comp">
+      <h3>Surfaces & Zones</h3>
+      <div class="dropzone">拖放媒体文件到这里<br/><span style="font-size:12px">点击选择，或将文件拖入</span></div>
+      <div style="font-size:12px;color:var(--muted);font-weight:600">运行状态</div>
+      <div style="display:flex;gap:14px;align-items:center">
+        <span><span class="dot ok"></span> 成功</span>
+        <span><span class="dot brand"></span> 队列</span>
+        <span><span class="dot err"></span> 失败</span>
+      </div>
+      <div>徽标 <span class="badge">3</span></div>
+    </div>
+    <div class="comp">
+      <h3>Nav & Toast</h3>
+      <div class="navitem active">▦ 格式转换</div>
+      <div class="navitem">▦ 压缩优化</div>
+      <div class="navitem">▦ 剪辑分割</div>
+      <div class="toast"><span class="dot ok"></span> 已加入任务队列</div>
+    </div>
+  </div>
+
+  <h2>4 · 扩展组件</h2>
+  <div class="grid cols-3">
+    <div class="comp">
+      <h3>Topbar & Icon buttons</h3>
+      <div class="topbar">
+        <div><div class="ttl">格式转换</div><div class="tsub">容器互转与编解码</div></div>
+        <div style="display:flex;gap:8px">
+          <div class="iconbtn">☾</div>
+          <div class="iconbtn">≡<span class="notif">5</span></div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="iconbtn" style="flex:1">☾ 主题</div>
+        <div class="iconbtn" style="flex:1">⚙ 设置</div>
+        <div class="iconbtn" style="flex:1">≡ 队列</div>
+      </div>
+    </div>
+    <div class="comp">
+      <h3>Segmented / Slider / Checkbox</h3>
+      <div class="seg"><button class="active">CRF</button><button>码率</button><button>预设</button></div>
+      <label class="check"><input type="checkbox" class="cb" checked /> 标准化响度</label>
+      <label class="check"><input type="checkbox" class="cb" /> 快速启动</label>
+      <label style="font-size:12px;color:var(--muted);font-weight:600">质量 — CRF 23</label>
+      <input type="range" min="18" max="35" value="23" class="rng" />
+    </div>
+    <div class="comp">
+      <h3>Progress bar</h3>
+      <div style="font-size:13px">运行中 · 进度 64%</div>
+      <div class="prog"><i style="width:64%"></i></div>
+      <div style="font-size:13px;margin-top:6px">不确定进度</div>
+      <div class="prog"><i class="animate-pulse" style="width:100%"></i></div>
+      <div style="font-size:13px;margin-top:6px">完成</div>
+      <div class="prog"><i class="ok" style="width:100%"></i></div>
+    </div>
+  </div>
+
+  <div class="grid cols-3" style="margin-top:14px">
+    <div class="comp">
+      <h3>Command card</h3>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div style="font-weight:600;font-size:14px">转码命令</div>
+        <button class="inlinebtn">复制</button>
+      </div>
+      <div class="cmdc">ffmpeg -i input.mov -c:v libx264 -crf 23 -c:a aac out.mp4</div>
+      <button class="btn-primary" style="padding:10px">加入队列并运行</button>
+    </div>
+    <div class="comp">
+      <h3>Info table</h3>
+      <table class="itbl">
+        <thead><tr><th>属性</th><th>值</th></tr></thead>
+        <tbody>
+          <tr><td class="k">时长</td><td>00:02:14</td></tr>
+          <tr><td class="k">分辨率</td><td>1920×1080</td></tr>
+          <tr><td class="k">编码</td><td>H.264 / AAC</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="comp">
+      <h3>Status mapping</h3>
+      <div style="display:flex;flex-direction:column;gap:8px;font-size:13px">
+        <span><span class="dot brand"></span> 进行中 running</span>
+        <span><span class="dot ok"></span> 完成 done</span>
+        <span><span class="dot err"></span> 失败 / 取消 failed</span>
+        <span><span class="dot" style="background:var(--muted)"></span> 队列 queued</span>
+        <span><span class="dot ok"></span> 引擎就绪</span>
+        <span><span class="dot err"></span> 引擎不可用</span>
+      </div>
+    </div>
+  </div>
+
+  <footer>由 design-md-generator 从 ffmpeg-studio 源码反向提取 · 所有色值取自 src/style.css 与 tailwind.config.js</footer>
+</div>
+</body>
+</html>
